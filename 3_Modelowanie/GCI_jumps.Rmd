@@ -1,0 +1,187 @@
+---
+title: "GCI_jumps"
+author: "Radosław Rybakowski"
+date: "2023-12-17"
+output: 
+	html_document:
+		theme: null
+		
+		highlight: null
+		css: styles.css
+</style>
+---
+
+# GDP growth caused by GCI indicators jumps with PanelMatch package
+
+### Libraries
+
+```{r Funkcje, echo=FALSE}
+source("matching_functions.R")
+
+```
+
+```{r Biblioteki, echo = FALSE, include = FALSE}
+library(tidyverse)
+library(writexl)
+library(panelView)
+library(PanelMatch)
+library(furrr)
+library(kableExtra)
+
+data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_22.xlsx)")
+
+dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)",
+										sheet = "GCI") %>% 
+	mutate(variables = paste0("wf_", variables))
+
+dict_cou <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)")
+```
+
+## Function to detect a jump
+
+Assume, that jump exist if:
+
+-   In period equal "jump_years" we have jump larger or equal "min_jump",
+
+-   In period "check_years" - number of years after potential jump, level of variable doesn't drop, so jump is sustained
+
+```{r Function to detect jumps}
+
+vector <- c(1,1,3,3,3,3,3,1,3)
+
+temp <- detect_jump(vector,
+				jump_years = 1,
+				check_years = 1,
+				min_jump = 0.025)
+
+temp
+```
+
+```{r Calculating jumps}
+
+data_wf <- data %>% 
+	select(cou, year, starts_with("wf")) 
+
+data_group <- data_wf %>%
+	select(-wf_TBPC) %>% #zmienna przyjmuje wartość zero
+	group_by(cou) %>%
+	arrange(cou, year)
+
+data_dynamics <- data_group %>% 
+	mutate(across(
+		.cols = starts_with("wf"),
+		.fns = ~.x/dplyr::lag(.x)
+	)) %>% 
+	filter(year != 2008) %>% 
+	mutate(across(
+		.cols = starts_with("wf"),
+		.fns = ~ purrr::accumulate(.x, \(acc, nxt) acc*nxt)
+	)) 
+```
+
+```{r, choosing jumps}
+jumps_args <- list(
+				is.dynamic = FALSE,
+				jump_years = 2,
+				check_years = 4,
+				min_jump = 0.5)
+
+data_jumps <- jump_data_proces(jumps_args)
+
+```
+
+### Jumps summary - which variables have large number of countries?
+
+```{r jumps_summary}
+jumps_sum_df <- jumps_summary()
+
+jumps_sum_df 
+```
+
+## Jumps visualization
+
+```{r countries_treated}
+filter_jumps <- treated_columns(wf_EOSQ067)
+dict_cou %>% 
+	filter(cou %in% filter_jumps) %>% 
+	select(country, cou)
+
+```
+
+```{r countries jumps line plot}
+visual_jumps(wf_EOSQ067)
+```
+
+```{r Panel visualization}
+visual_panel(wf_EOSQ067)
+```
+
+## Modelling
+
+Choose appropiate variable to model
+
+```{r prepare data to model}
+data_model <- data_to_model(wf_EOSQ067)
+
+
+```
+
+Perform matching
+
+```{r Panel Match,message=FALSE, warning=FALSE, include=FALSE}
+
+results <- my_matching(outcome = "y_ham",
+							  iterations = 1000)
+
+```
+
+```{r covariate balance}
+results 
+```
+
+```{r}
+vars_to_test <- jumps_sum_df %>% 
+	filter(value > 10) %>%
+	select(name) %>%  
+	unlist()
+# vars_to_test
+names(vars_to_test) <- vars_to_test
+```
+
+```{r Test many vars, include=FALSE}
+
+test_variables <- function(var){
+	data_model <- data_to_model({{var}}) # to trzeba poprawić
+	results <- my_matching(iterations = 100,
+								  df = data_model)
+	results_df <- tibble(results = results) %>%
+		mutate(results = map(results, .f = ~as.data.frame(.x))) %>% 
+		mutate(names = names(results)) %>%
+		unnest(cols = c(results)) %>% 
+		select(names, everything())
+	results_df
+}
+plan(multisession, workers = 4)
+results_list <- furrr::future_map(vars_to_test,test_variables,
+											 .options = furrr_options(seed = 123))
+print("finish")
+```
+
+```{r Test summary}
+
+all_df <- tibble(results = results_list) %>%
+	mutate(variable = names(results)) %>%
+	unnest(cols = c(results)) 
+all_df_summary <- all_df %>%
+	mutate(check = ifelse(`5%`> -0.005, 1, 0)) %>% 
+	group_by(variable) %>% 
+	summarize(sig_positive = mean(check)) %>% 
+	left_join(dict_GCI, by = c("variable" = "variables")) %>% 
+	arrange(desc(sig_positive))
+
+# list_to_save <- list(all_df, all_df_summary)
+# writexl::write_xlsx(list_to_save, "jumps_33_004_d_yham.xlsx")
+?get_covariate_balance
+
+
+```

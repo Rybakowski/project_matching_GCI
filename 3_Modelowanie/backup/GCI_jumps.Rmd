@@ -1,0 +1,279 @@
+---
+title: "GCI_jumps"
+author: "Radosław Rybakowski"
+date: "2023-12-17"
+output: html_document
+---
+#Wykrywanie jumpów na GCI i GWI
+###Biblioteki
+
+```{r, echo = FALSE}
+library(tidyverse)
+library(writexl)
+library(panelView)
+library(PanelMatch)
+
+data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_16.xlsx)")
+
+dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)",
+										sheet = "GCI") %>% 
+	mutate(variables = paste0("wf_", variables))
+
+dict_cou <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)")
+```
+## Writing function to detect jump:
+Assume, that jump exist if:
+  * in period equal "jump_years" we have jump larger or equal "min_jump",
+  * in period "check_years" - number of years after potential jump, 
+  level of variable doesn't drop, so jump is sustained
+
+```{r Function to detect jumps, include=FALSE}
+ii = 1
+detect_jump <- function(
+				vector,
+				jump_years = 3,
+				check_years = 3,
+				min_jump = 0.5){
+	len_vector = length(vector)
+	vector_output <- rep(0,len_vector)
+	for (ii in 1:len_vector){
+		# Count years which are necessary for letter actions
+		if(len_vector - (ii+jump_years-1) <  check_years){
+			# print(ii)
+			break
+		}
+		
+		jump_period <- vector[ii:(ii+jump_years-1)]
+		# if(any(is.na(jump_period))){
+		# 	# print(ii)
+		# 	next
+		# }
+		# Calculate a jump a check threshold (min_jump)
+		jump <- jump_period[jump_years]-jump_period[1]
+		if(jump < min_jump){
+			# print(ii)
+			next
+		}
+		# Check if in year in control period value level was lower that in the moment of jump
+		if(any(vector[(ii+jump_years):len_vector] - jump_period[jump_years] < 0)){
+			# print(ii)
+			next
+		}
+		earlier <- 0
+		
+		for(jj in 1:(length(jump_period)-2)){
+			jump <- jump_period[jump_years-jj]-jump_period[1]
+			if(jump < min_jump){
+				# print(ii)
+				next
+			}
+			if(any(vector[(ii+jump_years-jj):len_vector] - jump_period[jump_years-jj] < 0)){
+				# print(ii)
+				next
+			}
+			earlier <- jj
+		}
+		
+		# print((ii+jump_years):len_vector)
+		vector_output[(ii+jump_years - earlier):len_vector] <- 1
+		if(sum(vector_output) >0){
+			break
+		}
+	}	
+	return(vector_output)
+}
+
+vector <- c(1,1,3,3,3,3,3,3,3)
+vector
+# 
+detect_jump(vector,
+				jump_years = 4,
+				check_years = 2,
+				min_jump = 0.5)
+
+
+```
+
+```{r Calculating jumps}
+
+data_wf <- data %>% 
+	select(cou, year, starts_with("wf")) 
+
+data_group <- data_wf %>% 
+	select(-wf_TBPC) %>% #zmienna przyjmuje wartość zero
+	group_by(cou) %>% 
+	arrange(cou, year) 
+
+data_dynamics <- data_group %>% 
+	mutate(across(
+		.cols = starts_with("wf"),
+		.fns = ~.x/dplyr::lag(.x)
+	)) %>% 
+	filter(year != 2008) %>% 
+	mutate(across(
+		.cols = starts_with("wf"),
+		.fns = ~ purrr::accumulate(.x, \(acc, nxt) acc*nxt)
+	)) 
+	
+data_jumps <- data_dynamics %>%
+	mutate(across(
+		.cols = starts_with("wf"),
+		.fns = ~detect_jump(.x,
+				jump_years = 2,
+				check_years = 3,
+				min_jump = 0.1)
+	))
+
+```
+### Jumps sumamry - które zmienne pokazują dużo ilość krajów z treatmentem?
+```{r jumps_summary}
+data_jumps %>% 
+	summarize(across(
+		.cols = starts_with("wf"),
+		.fns = max
+	)) %>% 
+	ungroup() %>% 
+	summarize(across(
+		.cols = starts_with("wf"),
+		.fns = sum
+	)) %>% 
+	pivot_longer(
+		starts_with("wf")
+	) %>% 
+	arrange(desc(value)) %>% 
+	left_join(dict_GCI, by = c("name" = "variables")) %>% 
+	select(name, value, series)
+
+```
+
+## Graph - visualization
+
+```{r countries_treated}
+
+
+treated_columns <- function(column){
+	column <- enquo(column)	
+	filter_jumps <- data_jumps %>% 
+		select(year, cou, !!column) %>%
+		pivot_wider(names_from = cou,
+						values_from = !!column) %>% 
+		select(where(~sum(.x) > 0)) %>% 
+		colnames()
+}
+
+filter_jumps <- treated_columns(wf_EOSQ041)
+dict_cou %>% 
+	filter(cou %in% filter_jumps)
+
+```
+
+```{r countries jumps line plot}
+visual_jumps <- function(column){
+	column <- enquo(column)	
+	filter_jumps <- treated_columns(!!column)
+	data_group %>% 
+		select(year, cou, !!column) %>% #select_data
+		filter(cou %in% filter_jumps) %>% 
+		mutate(year = as.Date(paste0(year,"-01-01"))) %>% 
+		ggplot(aes(year, !!column)) +
+		geom_line(aes(color = cou)) +
+		theme_minimal()
+}
+
+visual_jumps(wf_EOSQ041)
+
+```
+```{r Panel visualization}
+visual_panel <- function(column){
+column <- enquo(column)	
+column_str <- quo_name(column)
+panelview(as.formula(paste0("1 ~ ", column_str)),
+          data = data_jumps %>% 
+				select(year, cou, !!column) %>% 
+			 	filter(cou %in% filter_jumps),
+			 index = c("cou","year"),
+			 legendOff = TRUE,
+			 gridOff = TRUE,
+			 by.timing = TRUE)
+} 
+
+# plotly::ggplotly(visual_panel(wf_GCI))
+visual_panel(wf_EOSQ041)
+```
+## Modelling part
+
+
+```{r prepare data to model}
+
+data_to_model <- function(column){
+	column <- enquo(column)	
+	output <- data %>%
+		select(year, cou, y, starts_with("pn")) %>% 
+		left_join(data_jumps %>% 
+					 	select(year, cou, !!column),
+					  by = join_by(year, cou)) %>% 
+		rename(treatment = !!column) %>% 
+		mutate(treatment = ifelse(year == 2008, 0, treatment)) %>% 
+		mutate(cou = as.integer(as.factor(cou))) %>% 
+		mutate(year = as.integer(year)) %>% 
+		select(-pn_pop, -pn_rgdpna) %>% 
+		arrange(cou, year) %>% 
+		as.data.frame()
+	return(output)
+}
+
+data_model <- data_to_model("wf_EOSQ041")
+
+# unique(data_model$year)
+# DisplayTreatment(unit.id = "cou",
+#                  time.id = "year", 
+#                  legend.position = "none",
+#                  xlab = "year", 
+#                  ylab = "Individual id",
+#                  treatment = "treatment",
+# 					  # matched.set = PM.results,
+# 					  # show.set.only = TRUE,
+# 					  data = data_model)
+
+```
+
+```{r Panel Match - define matching and set formula, message=FALSE, warning=FALSE, include=FALSE}
+my_matching <- function(x){
+	output <- list()
+	for (ii in c("mahalanobis", "ps.match", "CBPS.match", "ps.weight", "CBPS.weight")){
+		PM.results <- PanelMatch(
+			lag = 2, 
+			time.id = "year", 
+			unit.id = "cou", 
+			treatment = "treatment", 
+			refinement.method = ii,
+			data = data_model, 
+			match.missing = TRUE, 
+			covs.formula = ~ 
+			 # I(lag(pn_csh_x, 1:3)) + #Share of merchandise exports at current PPPs
+			 I(lag(pn_csh_i, 1:2)) + #Share of gross capital formation at current PPPs
+			 I(lag(y, 1:2)) + 
+			 I(lag(pn_csh_g, 1:2)) + #Share of government consumption at current PPPs
+			 I(lag(pn_hc, 1:2)) #Human capital index, based on years of schooling and returns to education
+			, 
+			size.match = 10,
+			qoi = "att" ,
+			outcome.var = "y",
+			lead = 0:2, 
+			forbid.treatment.reversal = FALSE,
+			use.diagonal.variance.matrix = TRUE
+			)
+		PE.results <- PanelEstimate(sets = PM.results, data = data_model)
+		output[[ii]] <- summary(PE.results)$summary
+	}
+	return(output)
+}
+results <- my_matching()
+
+```
+```{r, results}
+results
+```
+
+
+
