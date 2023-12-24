@@ -208,24 +208,74 @@ data_to_model <- function(column,
 }
 
 jump_data_proces <- function(args_list = jumps_args){
-	if(jumps_args$is.dynamic){
+	if(args_list$is.dynamic){
 		data_jumps <- data_dynamics %>%
 			mutate(across(
 				.cols = starts_with("wf"),
 				.fns = ~detect_jump(
 					.x,
-					jump_years = jumps_args$jump_years,
-					check_years = jumps_args$check_years,
-					min_jump = jumps_args$min_jump)))
+					jump_years = args_list$jump_years,
+					check_years = args_list$check_years,
+					min_jump = args_list$min_jump)))
 	}else{
 		data_jumps <- data_group %>%
 			mutate(across(
 				.cols = starts_with("wf"),
 				.fns = ~detect_jump(
 					.x,
-					jump_years = jumps_args$jump_years,
-					check_years = jumps_args$check_years,
-					min_jump = jumps_args$min_jump)))
+					jump_years = args_list$jump_years,
+					check_years = args_list$check_years,
+					min_jump = args_list$min_jump)))
 	}
 	return(data_jumps)
+}
+
+jump_data_proces_one <- function(args_list,
+											column){
+	column <- enquo(column)
+	if(args_list$is.dynamic){
+		data_jumps <- data_dynamics %>%
+			select(!!column, !matches("wf_")) %>% 
+			mutate(across(
+				.cols = !!column,
+				.fns = ~detect_jump(
+					.x,
+					jump_years = args_list$jump_years,
+					check_years = args_list$check_years,
+					min_jump = args_list$min_jump),
+				.names = glue::glue_collapse(as.numeric(args_list),"_"))) %>% 
+			select(-!!column)
+	}else{
+		data_jumps <- data_group %>%
+			select(!!column, !matches("wf_")) %>% 
+			mutate(across(
+				.cols = !!column,
+				.fns = ~detect_jump(
+					.x,
+					jump_years = args_list$jump_years,
+					check_years = args_list$check_years,
+					min_jump = args_list$min_jump),
+				.names = glue::glue_collapse(as.numeric(args_list),"_"))) %>% 
+			select(-!!column)
+			
+	}
+	return(data_jumps)
+}
+data_to_model_one <- function(column,
+								  treatment_df,
+								  df = data){
+	column <- enquo(column)	
+	output <- df %>%
+		select(year, cou, y, y_ham, y_ham_d, starts_with("pn")) %>% 
+		left_join(treatment_df %>% 
+					 	select(year, cou, !!column),
+					 by = join_by(year, cou)) %>% 
+		rename(treatment = !!column) %>% 
+		mutate(treatment = ifelse(year == 2008, 0, treatment)) %>% 
+		mutate(cou = as.integer(as.factor(cou))) %>% 
+		mutate(year = as.integer(year)) %>% 
+		select(-pn_pop, -pn_rgdpna) %>% 
+		arrange(cou, year) %>% 
+		as.data.frame()
+	return(output)
 }
