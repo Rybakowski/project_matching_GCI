@@ -1,10 +1,3 @@
----
-title: "GCI_jumps"
-author: "Radosław Rybakowski"
-date: "2023-12-17"
-output: "html"
----
-
 # GDP growth caused by GCI indicators jumps with PanelMatch package
 
 ### Libraries
@@ -76,9 +69,9 @@ data_dynamics <- data_group %>%
 ```{r, choosing jumps}
 jumps_args <- list(
 				is.dynamic = TRUE,
-				jump_years = 1,
-				check_years = 3,
-				min_jump = 0.03)
+				jump_years = 3,
+				check_years = 2,
+				min_jump = 0.1)
 
 data_jumps <- jump_data_proces(jumps_args)
 
@@ -95,7 +88,7 @@ jumps_sum_df
 ## Jumps visualization
 
 ```{r countries_treated}
-filter_jumps <- treated_columns(wf_EOSQ067)
+filter_jumps <- treated_columns(wf_EOSQ057)
 dict_cou %>% 
 	filter(cou %in% filter_jumps) %>% 
 	select(cou, country)
@@ -103,11 +96,11 @@ dict_cou %>%
 ```
 
 ```{r countries jumps line plot}
-visual_jumps(wf_EOSQ067)
+visual_jumps(wf_EOSQ057)
 ```
 
 ```{r Panel visualization}
-visual_panel(wf_EOSQ067)
+visual_panel(wf_EOSQ057)
 ```
 
 ## Modelling
@@ -115,17 +108,17 @@ visual_panel(wf_EOSQ067)
 Choose appropiate variable to model
 
 ```{r prepare data to model}
-data_model <- data_to_model(wf_EOSQ067)
+data_model <- data_to_model(wf_EOSQ057)
 
 
 ```
 
 Perform matching
 
-```{r Panel Match,message=FALSE, warning=FALSE, include=FALSE}
+```{r Panel Match, include = FALSE}
 
-results <- my_matching(outcome = "y_ham",
-							  iterations = 1000)
+results <- suppressWarnings(invisible(my_matching(outcome = "y_ham",
+							  iterations = 1000)))
 
 ```
 
@@ -182,7 +175,7 @@ all_df_summary
 
 ```{r,include=FALSE}
 jumps_args_list <- list(
-	is.dynamic = TRUE,
+	is.dynamic = c(TRUE, FALSE),
 	jump_years = 1:3,
 	check_years = 2:5,
 	min_jump = 
@@ -191,63 +184,29 @@ jumps_args_list <- list(
 				length.out = 10)) %>% 
 	cross()
 
-one_var_df_proc <- function(list_jumps_args = jumps_args_list){
-	list_names <- list_jumps_args %>% 
-		map(.f = ~glue::glue_collapse(as.numeric(.x),"_")) 
-	
-	list_jumps_test <- list_jumps_args %>% 
-		set_names(list_names) %>% 
-		map(.f  = jump_data_proces_one,
-			  column = wf_EOSQ067)
-	
-	output_df <- reduce(list_jumps_test, 
-			left_join,
-			by = c("cou","year")) %>% 
-		ungroup()
-	
-	cor_test <- cor(output_df  %>% 
-	 	select(-cou,-year)) 
-	cor_test[cor_test != 1] <- NA
-	cor_test[upper.tri(cor_test, diag = TRUE)] <- NA
-	
-	to_remove <- cor_test %>% 
-		as.data.frame() %>% 
-		rownames_to_column() %>% 
-		pivot_longer(-rowname) %>% 
-		drop_na() %>% 
-		select(rowname) %>% 
-		unique() %>% 
-		unlist() %>% 
-		unname()
-	
-	output_df <- output_df %>% 
-		select(!all_of(to_remove))
-	return(output_df)
-}
+column <- "wf_GCI.B.08.01"
 
-data_onevar <- one_var_df_proc()
-vars_to_test <- colnames(data_onevar) %>% 
-	setdiff(c('cou', 'year'))
+data_onevar <- one_var_df_proc(column = !!column)
+
+
+vars_to_test <- data_onevar %>% 
+	select(-year) %>% 
+	group_by(cou) %>% 
+	summarize(across(.cols = everything(),
+						  .fns = max)) %>% 
+	ungroup() %>% 
+	select(-cou) %>% 
+	select(where(~sum(.x)>10) & where(~sum(.x)<50) ) %>% ## only jumps where minimum 10 countries were detected
+	colnames()
+
+
 names(vars_to_test) <- vars_to_test
 
-test_one_variable <- function(var){
-	data_model <- data_to_model_one(
-			{{var}},
-			data_onevar
-		)
-	results <- my_matching(iterations = 100,
-								  df = data_model)
-	results_df <- tibble(results = results) %>%
-		mutate(results = map(results, .f = ~as.data.frame(.x))) %>% 
-		mutate(names = names(results)) %>%
-		unnest(cols = c(results)) %>% 
-		select(names, everything())
-	return(results_df)
-}
 
 plan(multisession, workers = 4)
 results_list <- furrr::future_map(vars_to_test, test_one_variable,
 											 .options = furrr_options(seed = 123))
+print("finish")
 
 ```
 
@@ -256,13 +215,85 @@ all_df <- tibble(results = results_list) %>%
 	mutate(variable = names(results)) %>%
 	unnest(cols = c(results)) 
 all_df_summary <- all_df %>%
-	mutate(check = ifelse(`5%`> -0.005, 1, 0)) %>% 
+	mutate(check = ifelse(`5%`> -0.00, 1, 0)) %>% 
 	group_by(variable) %>% 
 	summarize(sig_positive = mean(check)) %>% 
 	arrange(desc(sig_positive))
 
-# list_to_save <- list(all_df, all_df_summary)
-# writexl::write_xlsx(list_to_save, "jumps_33_004_d_yham.xlsx")
-all_df_summary
+list_to_save <- list(all_df, all_df_summary)
+writexl::write_xlsx(list_to_save, paste0("results/jumps_",column,"_yham.xlsx"))
+
+all_df_summary 
+
+```
+
+```{r}
+data_model %>% 
+
+	left_join(data_onevar %>% 
+				 		mutate(cou = as.integer(as.factor(cou)))) %>%
+	filter(year != 2008) %>% 
+	select(cou, year, `1_3_2_0.1`, treatment) %>% 
+	ungroup() %>% 
+	summarize(x = sum(abs(`1_3_2_0.1`- treatment)))
+
+```
+
+```{r, echo = FALSE}
+test_everything <- function(variable){
+	variable <- enquo(variable)
+		jumps_args_list <- list(
+		is.dynamic = c(TRUE, FALSE),
+		jump_years = 1:3,
+		check_years = 2:5,
+		min_jump = 
+			seq(from = 0.01,
+				by = 0.01,
+					length.out = 10)) %>% 
+		cross()
+	
+	data_onevar <- one_var_df_proc(column = !!variable)
+	
+	vars_to_test <- data_onevar %>% 
+		select(-year) %>% 
+		group_by(cou) %>% 
+		summarize(across(.cols = everything(),
+							  .fns = max)) %>% 
+		ungroup() %>% 
+		select(-cou) %>% 
+		select(where(~sum(.x)>10) & where(~sum(.x)<50) ) %>% 
+		colnames()
+	
+	names(vars_to_test) <- vars_to_test
+	# return(list(vars_to_test, data_onevar))
+	results_list <- map(vars_to_test, test_one_variable)
+	all_df <- tibble(results = results_list) %>%
+			mutate(variable = names(results)) %>%
+			unnest(cols = c(results))
+	all_df_summary <- all_df %>%
+		mutate(check = ifelse(`5%`> -0.00, 1, 0)) %>%
+		group_by(variable) %>%
+		summarize(sig_positive = mean(check)) %>%
+		arrange(desc(sig_positive))
+
+	list_to_save <- list(all_df, all_df_summary)
+	writexl::write_xlsx(list_to_save, paste0("results/jumps_",column,"_yham.xlsx"))
+}
+
+# vars_to_test_col <- vars_to_test[1:2]
+
+
+plan(multisession, workers = 8)
+future_map(vars_to_test_col, safely(test_everything), .progress = TRUE,
+			  .options = furrr_options(seed = 123))
+print("finish")
+
+
+```
+
+```{r,echo=FALSE}
+map(3:20, 
+	 .f = ~base::Sys.sleep(1), 
+	 .progress = TRUE)
 
 ```
