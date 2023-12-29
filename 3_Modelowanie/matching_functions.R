@@ -274,8 +274,9 @@ one_var_df_proc <- function(list_jumps_args = jumps_args_list,
 	
 	list_jumps_test <- list_jumps_args %>% 
 		set_names(list_names) %>% 
-		map(.f  = jump_data_proces_one,
-			 column = !!column)
+		map(.f  = ~jump_data_proces_one(
+			args_list = .x, 
+			column = !!column))
 	
 	output_df <- reduce(list_jumps_test, 
 							  left_join,
