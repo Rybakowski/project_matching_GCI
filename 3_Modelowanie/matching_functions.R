@@ -122,10 +122,19 @@ visual_panel <- function(column){
 my_matching <- function(iterations = 1000,
 								outcome = "y_ham",
 								size_match = 10,
-								df = data_model
-								){
+								df = data_model,
+								formula =  ~ 
+									# I(lag(pn_csh_x, 1:3)) + #Share of merchandise exports at current PPPs
+									I(lag(pn_wbinf, 1:2)) + #inflation
+									I(lag(pn_csh_i, 1:2)) + #Share of gross capital formation at current PPPs
+									# I(lag(y, 1:2)) + 
+									I(lag(pn_freedom, 1:2)) + #freedom
+									I(lag(pn_csh_g, 1:2)) + #Share of government consumption at current PPPs
+									I(lag(pn_hc, 1:2)), #Human capital index, based on years of schooling and returns to education
+								matching_methods = c("mahalanobis", "ps.match", "CBPS.match", "ps.weight", "CBPS.weight")
+									){
 	output <- list()
-	for (ii in c("mahalanobis", "ps.match", "CBPS.match", "ps.weight", "CBPS.weight")){
+	for (ii in matching_methods){
 		PM.results <- PanelMatch(
 			lag = 2, 
 			time.id = "year", 
@@ -134,13 +143,7 @@ my_matching <- function(iterations = 1000,
 			refinement.method = ii,
 			data = df, 
 			match.missing = TRUE, 
-			covs.formula = ~ 
-				# I(lag(pn_csh_x, 1:3)) + #Share of merchandise exports at current PPPs
-				I(lag(pn_csh_i, 1:2)) + #Share of gross capital formation at current PPPs
-				I(lag(y, 1:2)) + 
-				I(lag(pn_csh_g, 1:2)) + #Share of government consumption at current PPPs
-				I(lag(pn_hc, 1:2)) #Human capital index, based on years of schooling and returns to education
-			, 
+			covs.formula = formula, 
 			size.match = size_match,
 			qoi = "att" ,
 			outcome.var = outcome,
@@ -255,8 +258,9 @@ test_one_variable <- function(var,data_one = data_onevar){
 		{{var}},
 		data_one
 	)
-	results <- my_matching(iterations = 50,
-								  df = data_model)
+	results <- my_matching(iterations = 100,
+								  df = data_model,
+								  matching_methods = c("CBPS.match", "CBPS.weight"))
 	results_df <- tibble(results = results) %>%
 		mutate(results = map(results, .f = ~as.data.frame(.x))) %>% 
 		mutate(names = names(results)) %>%

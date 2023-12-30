@@ -1,4 +1,4 @@
-setwd("C:/Users/rados/OneDrive - SGH/Nowy_projekt_BNK/2_Przetwarzanie_danych/Data_merging")
+setwd("C:/Users/rados/OneDrive - SGH/project_matching_GCI/2_Przetwarzanie_danych/Data_merging")
 
 # Biblioteki ----------------------------------------------------------------------------------
 
@@ -14,11 +14,12 @@ library(neverhpfilter)
 GCI_path <- "C:/Users/rados/OneDrive - SGH/Nowy_projekt_BNK/2_Przetwarzanie_danych/GCI/GCI_data.xlsx"
 PENN_path <- r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\1_Dane_surowe\pwt1001.xlsx)"
 GCI_dict <- "C:/Users/rados/OneDrive - SGH/Nowy_projekt_BNK/2_Przetwarzanie_danych/GCI/GCI_dicts.xlsx"
-	
+tymek_path <- r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\2_Przetwarzanie_danych\wskaźniki_diff_in_diff.csv)"
+
 GCI_dict <- read_xlsx(GCI_dict, sheet = "variables")
 GCI_raw <- read_xlsx(GCI_path)
 PENN_raw <- read_xlsx(PENN_path, sheet = "Data")
-
+tymek_raw <- read_csv(tymek_path)
 
 
 # function ------------------------------------------------------------------------------------
@@ -33,10 +34,24 @@ my_hamilton <- function(dates, column){
 	return(output)
 }
 
+# Freedom & Polity 2 --------------------------------------------------------------------------
+
+tymek_df <- tymek_raw %>%
+	select(countrycode, year, FP.CPI.TOTL.ZG, polity2, Index.of.Economic.Freedom) %>% 
+	rename(pn_wbinf = FP.CPI.TOTL.ZG,
+			 pn_freedom = Index.of.Economic.Freedom) %>%
+	rename(cou = countrycode) %>% 
+	select(year, cou, pn_freedom, pn_wbinf) %>% 
+	mutate(pn_freedom = as.numeric(pn_freedom))
+# 	
+# temp2 <- tymek_df %>%
+# 	filter(year > 2006) %>%
+# 	select(cou, polity2) %>%
+# 	group_by(cou) %>%
+# 	miss_var_summary()
+
 
 # Processing GWI ------------------------------------------------------------------------------
-
-
 
 GCI_df <- GCI_raw %>% 
 	rename_with(-c(year, cou), .fn = ~paste0("wf_",.x))  
@@ -98,12 +113,14 @@ PENN_df_2 <- PENN_df %>%
 
 data_df <- GCI_df2 %>% 
 	mutate(year = as.numeric(year)) %>% 
-	left_join(PENN_df_2, by = c("cou", "year")) %>% 
-	filter(!cou %in% c("AZE", "GEO", "MKD", "MNE", "OMN", "TCD")) %>% 
+	left_join(PENN_df_2, by = c("cou", "year")) %>%
+	left_join(tymek_df, by = c("cou", "year")) %>% 
+	filter(!cou %in% c("ARG","TWN","ZWE", "VEN", "AZE", "GEO", "MKD", "MNE", "OMN", "TCD")) %>% 
 	select(year, cou, everything()) %>% 
-	arrange(cou, year) 
+	arrange(cou, year) #%>% 
+	# select(cou, year, pn_wbinf, pn_freedom) %>%
 	# filter(if_any(.cols = everything(),
-	# 				  .fn = is.na)) %>% 
+	# 				  .fn = is.na)) #%>%
 	# count(cou) %>% select(cou) %>% unlist()
 
 dict_new <- tibble(variables = colnames(GCI_df2)) %>% 
@@ -119,8 +136,12 @@ countries_final <- data_df %>%
 	
 dict_final <- list(countries = countries_final,
 						 GCI = dict_new)
+# 
+# data_df %>% 
+# 	distinct(cou) %>% 
+# 	nrow()
 
-# write_xlsx(data_df, "database_2023_12_22.xlsx")
+# write_xlsx(data_df, "database_2023_12_29.xlsx")
 
 # write_xlsx(dict_final, "dict_master.xlsx")
 

@@ -1,3 +1,7 @@
+```{r}
+
+```
+
 # GDP growth caused by GCI indicators jumps with PanelMatch package
 
 ### Libraries
@@ -15,13 +19,15 @@ library(PanelMatch)
 library(furrr)
 library(kableExtra)
 
-data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_22.xlsx)")
+# data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_22.xlsx)")
 
-dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)",
+data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\2_Przetwarzanie_danych\Data_merging\database_2023_12_29.xlsx)")
+
+dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\dict_master.xlsx)",
 										sheet = "GCI") %>% 
 	mutate(variables = paste0("wf_", variables))
 
-dict_cou <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\dict_master.xlsx)")
+dict_cou <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\dict_master.xlsx)")
 ```
 
 ## Function to detect a jump
@@ -68,9 +74,9 @@ data_dynamics <- data_group %>%
 
 ```{r, choosing jumps}
 jumps_args <- list(
-				is.dynamic = TRUE,
-				jump_years = 2,
-				check_years = 2,
+				is.dynamic = FALSE,
+				jump_years = 3,
+				check_years = 4,
 				min_jump = 0.1)
 
 data_jumps <- jump_data_proces(jumps_args)
@@ -88,7 +94,7 @@ jumps_sum_df
 ## Jumps visualization
 
 ```{r countries_treated}
-filter_jumps <- treated_columns(wf_GCI.A.02)
+filter_jumps <- treated_columns(wf_GCI.B)
 dict_cou %>% 
 	filter(cou %in% filter_jumps) %>% 
 	select(cou, country)
@@ -96,11 +102,11 @@ dict_cou %>%
 ```
 
 ```{r countries jumps line plot}
-visual_jumps(wf_GCI.A.02)
+visual_jumps(wf_GCI.B)
 ```
 
 ```{r Panel visualization}
-visual_panel(wf_GCI.A.02)
+visual_panel(wf_GCI.B)
 ```
 
 ## Modelling
@@ -108,7 +114,7 @@ visual_panel(wf_GCI.A.02)
 Choose appropiate variable to model
 
 ```{r prepare data to model}
-data_model <- data_to_model(wf_GCI.A.02)
+data_model <- data_to_model(wf_GCI.B)
 
 
 ```
@@ -117,8 +123,11 @@ Perform matching
 
 ```{r Panel Match, include = FALSE}
 
-results <- suppressWarnings(invisible(my_matching(outcome = "y_ham",
-							  iterations = 1000)))
+results <- suppressWarnings(invisible(
+	my_matching(outcome = "y_ham",
+				   iterations = 1000,
+					matching_methods = c("CBPS.match","CBPS.weight"))
+	))
 
 ```
 
@@ -126,9 +135,11 @@ results <- suppressWarnings(invisible(my_matching(outcome = "y_ham",
 results 
 ```
 
+### Test all variables within one jump definition
+
 ```{r}
 vars_to_test <- jumps_sum_df %>% 
-	filter(value > 10) %>%
+	# filter(value > 10) %>%
 	select(name) %>%  
 	unlist()
 # vars_to_test
@@ -174,6 +185,8 @@ all_df_summary
 
 ```
 
+### Test one variable among many jumps definitions.
+
 ```{r,include=FALSE}
 jumps_args_list <- list(
 	is.dynamic = c(TRUE, FALSE),
@@ -196,7 +209,7 @@ vars_to_test <- data_onevar %>%
 						  .fns = max)) %>% 
 	ungroup() %>% 
 	select(-cou) %>% 
-	select(where(~sum(.x)>10) & where(~sum(.x)<50) ) %>% ## only jumps where minimum 10 countries were detected
+	select(where(~sum(.x)>15) & where(~sum(.x)<45) ) %>% ## only jumps where minimum 10 countries were detected
 	colnames()
 
 
@@ -215,45 +228,57 @@ all_df <- tibble(results = results_list) %>%
 	mutate(variable = names(results)) %>%
 	unnest(cols = c(results)) 
 all_df_summary <- all_df %>%
-	mutate(check = ifelse(`5%`> -0.005, 1, 0)) %>% 
-	group_by(variable) %>% 
-	summarize(sig_positive = mean(check)) %>% 
-	arrange(desc(sig_positive))
+	mutate(check_1  = ifelse(`5%`> 0.00, 1, 0)) %>%
+	mutate(check_2  = ifelse(`95%`< 0.00, 1, 0)) %>%
+	group_by(variable) %>%
+	summarize(sig_positive = mean(check_1),
+				 sig_negative = mean(check_2)) %>%
+	arrange(desc(sig_negative))
+
 
 list_to_save <- list(all_df, all_df_summary)
-writexl::write_xlsx(list_to_save, paste0("results/jumps_",column,"_yham.xlsx"))
+# writexl::write_xlsx(list_to_save, paste0("results/jumps_",column,"_yham.xlsx"))
 
 all_df_summary 
 
 ```
 
 ```{r}
-data_model %>% 
-
-	left_join(data_onevar %>% 
-				 		mutate(cou = as.integer(as.factor(cou)))) %>%
-	filter(year != 2008) %>% 
-	select(cou, year, `1_3_2_0.1`, treatment) %>% 
-	ungroup() %>% 
-	summarize(x = sum(abs(`1_3_2_0.1`- treatment)))
+# data_model %>% 
+# 	left_join(data_onevar %>% 
+# 				 		mutate(cou = as.integer(as.factor(cou)))) %>%
+# 	filter(year != 2008) %>% 
+# 	select(cou, year, `1_3_2_0.1`, treatment) %>% 
+# 	ungroup() %>% 
+# 	summarize(x = sum(abs(`1_3_2_0.1`- treatment)))
 
 ```
+
+### Test all combinations: many variables & many jump definition
 
 ```{r, include = FALSE}
 test_everything <- function(variable){
 	# variable <- enquo(variable)
-	jumps_args_list <- list(
-	is.dynamic = c(TRUE, FALSE),
+	jumps_args_list_1 <- list(
+	is.dynamic = c(FALSE),
 	jump_years = 1:3,
 	check_years = 2:5,
 	min_jump = 
-		seq(from = 0.01,
-			by = 0.01,
-				length.out = 10)) %>% 
-	cross()
+		seq(from = 0.1,
+			by = 0.05,
+				length.out = 20)) %>% cross()
+	jumps_args_list_2 <- list(
+		is.dynamic = c(TRUE),
+		jump_years = 1:3,
+		check_years = 2:5,
+		min_jump = 
+			seq(from = 0.02,
+				by = 0.01,
+					length.out = 20)) %>% cross()
+	jumps_args_list <- append(jumps_args_list_2, jumps_args_list_1)
 
-	data_onevar <- one_var_df_proc(column = !!variable)
-	
+	data_onevar <- one_var_df_proc(column = !!variable) %>% 
+		filter(year != 2008)
 	vars_to_test <- data_onevar %>% 
 		select(-year) %>% 
 		group_by(cou) %>% 
@@ -261,32 +286,51 @@ test_everything <- function(variable){
 							  .fns = max)) %>% 
 		ungroup() %>% 
 		select(-cou) %>% 
-		select(where(~sum(.x)>10) & where(~sum(.x)<50) ) %>% 
+		select(where(~sum(.x)>15) & where(~sum(.x)<45) ) %>% 
 		colnames()
+	
+	counts <- data_onevar %>%
+		select(cou, all_of(vars_to_test)) %>% 
+		group_by(cou) %>% 
+		summarize(across(.cols = everything(),
+							  .fns = max)) %>% 
+		ungroup() %>% 
+		select(-cou) %>% 
+		summarize(across(.cols = everything(),
+							  .fns = sum)) %>% 
+		pivot_longer(cols = everything()) %>% 
+		rename(count = value) %>% 
+		rename(variable = name)
+	# return(counts)
+	
 	if (length(vars_to_test) == 0){
 		return(NULL)
 	}
 	names(vars_to_test) <- vars_to_test
 	# return(list(vars_to_test, data_onevar))
 	results_list <- map(vars_to_test, 
-			  .f = ~test_one_variable(.x, data_one = data_onevar))
+			  .f = ~test_one_variable(.x, 
+  						data_one = data_onevar))
 	all_df <- tibble(results = results_list) %>%
 			mutate(variable = names(results)) %>%
-			unnest(cols = c(results))
+			unnest(cols = c(results)) %>% 
+			left_join(counts, by = "variable")
 	all_df_summary <- all_df %>%
-		mutate(check = ifelse(`5%`> -0.00, 1, 0)) %>%
-		group_by(variable) %>%
-		summarize(sig_positive = mean(check)) %>%
-		arrange(desc(sig_positive))
-
+		mutate(check_1  = ifelse(`5%`> 0.00, 1, 0)) %>%
+		mutate(check_2  = ifelse(`95%`< 0.00, 1, 0)) %>%
+		group_by(variable, count) %>%
+		summarize(sig_positive = mean(check_1),
+					 sig_negative = mean(check_2)) %>%
+		arrange(desc(sig_positive)) 
+		
 	list_to_save <- list(all_df, all_df_summary)
-	writexl::write_xlsx(list_to_save, paste0("results/jumps_",variable,"_yham.xlsx"))
+	writexl::write_xlsx(list_to_save, paste0("results_2023_12_29/jumps_",variable,"_yham.xlsx"))
 	return(list(df = all_df_summary, name = variable))
 }
  
 
 plan(multisession, workers = 8)
-final_results <- future_map(vars_to_test_col, safely(test_everything), .progress = TRUE,
+final_results <- future_map(rest_to_test, safely(test_everything), .progress = TRUE,
 			  .options = furrr_options(seed = 123))
 print("finish")
 
@@ -296,19 +340,30 @@ print("finish")
 ```{r,echo=FALSE}
 final_results_df <- final_results
 
-final_results_tibble <- final_results_df %>% 
+final_results_sig_positive <- final_results_df %>% 
 	map(.f = ~.x$result$df) %>% 
 	map2(.y = names(final_results_df), ~.x %>% 
 		  	cbind(name = .y)) %>% 
 	discard(.p = ~!is.data.frame(.x)) %>%
-	map(.f =~pivot_wider(.x, values_from = sig_positive)) %>% 
+	map(.f = ~.x %>%
+		 	select(-sig_negative) %>% 
+		 	pivot_wider(values_from = sig_positive)) %>% 
 	reduce(.f = full_join, by = join_by(variable))
 
+final_results_sig_negative <- final_results_df %>% 
+	map(.f = ~.x$result$df) %>% 
+	map2(.y = names(final_results_df), ~.x %>% 
+		  	cbind(name = .y)) %>% 
+	discard(.p = ~!is.data.frame(.x)) %>%
+	map(.f = ~.x %>%
+		 	select(-sig_positive) %>% 
+		 	pivot_wider(values_from = sig_negative)) %>% 
+	reduce(.f = full_join, by = join_by(variable))
 # write_xlsx(final_results_tibble, "results_all.xlsx")
 ```
 
 ```{r}
-final_results_tibble %>% 
+final_results_sig_negative  %>% 
 	pivot_longer(-variable) %>% 
 	drop_na() %>% 
 	group_by(name) %>% 
@@ -316,4 +371,111 @@ final_results_tibble %>%
 	arrange(desc(value)) %>% 
 	left_join(dict_GCI, by = c("name" = "variables")) %>% 
 	select(name, value, series)
+```
+
+```{r}
+
+temp <- list.files("results_2023_12_29") 
+
+filter_temp <- temp %>% str_remove("jumps_") %>% str_remove("_yham.xlsx")
+rest_to_test <- vars_to_test_col[!vars_to_test_col %in% filter_temp]
+
+final_results_read <- paste0("results_2023_12_29\\", temp) %>% 
+	map(.f = function(x){
+		sheet1 <- read_xlsx(x, sheet = "Sheet1")
+		sheet2 <- read_xlsx(x, sheet = "Sheet2")
+		to_return <- list(
+			Sheet1 = sheet1,
+			Sheet2 = sheet2,
+			name = x %>% 
+				str_remove("results_2023_12_29\\\\") %>% 
+				str_remove("jumps_") %>%
+				str_remove("_yham.xlsx"))
+	}) 
+
+
+```
+
+```{r}
+
+final_results_sig_positive <- 
+	final_results_read %>% 
+	map(.f = ~.x$Sheet2) %>% 
+	map2(.y = final_results_read, 
+		  ~.x %>% cbind(name = .y$name)) %>% 
+	# discard(.p = ~!is.data.frame(.x)) %>%
+	map(.f = ~.x %>%
+		 	select(-c(count, sig_negative)) %>% 
+		 	pivot_wider(values_from = sig_positive)) %>% 
+	reduce(.f = full_join, by = join_by(variable)) %>% 
+	arrange(variable)
+
+final_results_sig_negative <- 
+	final_results_read %>% 
+	map(.f = ~.x$Sheet2) %>% 
+	map2(.y = final_results_read, 
+		  ~.x %>% cbind(name = .y$name)) %>% 
+	# discard(.p = ~!is.data.frame(.x)) %>%
+	map(.f = ~.x %>%
+		 	select(-c(count, sig_positive)) %>% 
+		 	pivot_wider(values_from = sig_negative)) %>% 
+	reduce(.f = full_join, by = join_by(variable)) %>% 
+	arrange(variable)
+# writexl::write_xlsx(list(
+# 	final_results_sig_negative,
+# 	final_results_sig_positive),
+# 	"all_results_2023_12_29.xlsx"
+# )
+```
+
+```{r}
+sig_pos_summary <- final_results_sig_positive  %>% 
+	pivot_longer(-variable) %>% 
+	drop_na() %>% 
+	group_by(name) %>% 
+	# summarize(value = max(value, na.rm = TRUE)) %>% 
+	summarize(value = mean(value, na.rm = TRUE)) %>%
+	arrange(desc(value)) %>% 
+	left_join(dict_GCI, by = c("name" = "variables")) %>% 
+	select(name, value, series) %>% 
+	rename(pos = value)
+
+sig_neg_summary <- final_results_sig_negative  %>% 
+	pivot_longer(-variable) %>% 
+	drop_na() %>% 
+	group_by(name) %>% 
+	# summarize(value = max(value, na.rm = TRUE)) %>% 
+	summarize(value = mean(value, na.rm = TRUE)) %>%
+	arrange(desc(value)) %>%
+	left_join(dict_GCI, by = c("name" = "variables")) %>% 
+	select(name, value, series) %>% 
+	rename(neg = value)
+
+all_summary <- sig_neg_summary %>% 
+	left_join(sig_pos_summary,
+				 by = join_by(name, series)) %>% 
+	select(name, neg, pos, series) %>% 
+	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}")) %>% 
+	arrange(desc(pos))
+
+all_summary
+
+```
+
+```{r}
+final_results_sig_positive %>% 
+	summarize(across(
+		-variable,
+		.fns = ~max(.x, na.rm = TRUE)
+	)) %>% 
+	pivot_longer(everything()) %>% 
+	summarize(value = mean(value))
+
+final_results_sig_negative %>% 
+	summarize(across(
+		-variable,
+		.fns = ~max(.x, na.rm = TRUE)
+	)) %>% 
+	pivot_longer(everything()) %>% 
+	summarize(value = mean(value))
 ```
