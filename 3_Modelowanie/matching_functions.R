@@ -123,6 +123,7 @@ my_matching <- function(iterations = 1000,
 								outcome = "y_ham",
 								size_match = 10,
 								df = data_model,
+								get_balance = FALSE,
 								formula =  ~ 
 									# I(lag(pn_csh_x, 1:3)) + #Share of merchandise exports at current PPPs
 									I(lag(pn_wbinf, 1:2)) + #inflation
@@ -133,14 +134,39 @@ my_matching <- function(iterations = 1000,
 									I(lag(pn_hc, 1:2)), #Human capital index, based on years of schooling and returns to education
 								matching_methods = c("mahalanobis", "ps.match", "CBPS.match", "ps.weight", "CBPS.weight")
 									){
-	output <- list()
-	for (ii in matching_methods){
+	if(get_balance == FALSE){
+		output <- list()
+		for (ii in matching_methods){
+			PM.results <- PanelMatch(
+				lag = 2, 
+				time.id = "year", 
+				unit.id = "cou", 
+				treatment = "treatment", 
+				refinement.method = ii,
+				data = df, 
+				match.missing = TRUE, 
+				covs.formula = formula, 
+				size.match = size_match,
+				qoi = "att" ,
+				outcome.var = outcome,
+				lead = 0:2, 
+				forbid.treatment.reversal = FALSE,
+				use.diagonal.variance.matrix = TRUE
+			)
+			PM.estimates <- PanelEstimate(sets = PM.results, 
+													data = df,
+													confidence.level = 0.9,
+													number.iterations = iterations)
+			output[[ii]] <- summary(PM.estimates)$summary
+		}
+		return(output)	
+	}else{
 		PM.results <- PanelMatch(
 			lag = 2, 
 			time.id = "year", 
 			unit.id = "cou", 
 			treatment = "treatment", 
-			refinement.method = ii,
+			refinement.method = "CBPS.match",
 			data = df, 
 			match.missing = TRUE, 
 			covs.formula = formula, 
@@ -151,13 +177,14 @@ my_matching <- function(iterations = 1000,
 			forbid.treatment.reversal = FALSE,
 			use.diagonal.variance.matrix = TRUE
 		)
-		PM.estimates <- PanelEstimate(sets = PM.results, 
-											 data = df,
-											 confidence.level = 0.9,
-											 number.iterations = iterations)
-		output[[ii]] <- summary(PM.estimates)$summary
+		output <- get_covariate_balance(PM.results$att, data_model, 
+												  covariates = c("pn_wbinf",
+												  					"pn_csh_i",
+												  					"pn_freedom"),
+												  plot = FALSE, ylim = c(-2,2))
+		return(output)
 	}
-	return(output)
+	
 }
 
 

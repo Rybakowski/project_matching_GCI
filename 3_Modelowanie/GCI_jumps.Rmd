@@ -1,7 +1,3 @@
-```{r}
-
-```
-
 # GDP growth caused by GCI indicators jumps with PanelMatch package
 
 ### Libraries
@@ -17,6 +13,7 @@ library(writexl)
 library(panelView)
 library(PanelMatch)
 library(furrr)
+library(readxl)
 library(kableExtra)
 
 # data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_22.xlsx)")
@@ -75,9 +72,9 @@ data_dynamics <- data_group %>%
 ```{r, choosing jumps}
 jumps_args <- list(
 				is.dynamic = FALSE,
-				jump_years = 3,
-				check_years = 4,
-				min_jump = 0.1)
+				jump_years = 2,
+				check_years = 2,
+				min_jump = 0.25)
 
 data_jumps <- jump_data_proces(jumps_args)
 
@@ -94,7 +91,7 @@ jumps_sum_df
 ## Jumps visualization
 
 ```{r countries_treated}
-filter_jumps <- treated_columns(wf_GCI.B)
+filter_jumps <- treated_columns(wf_GCI.A)
 dict_cou %>% 
 	filter(cou %in% filter_jumps) %>% 
 	select(cou, country)
@@ -102,11 +99,11 @@ dict_cou %>%
 ```
 
 ```{r countries jumps line plot}
-visual_jumps(wf_GCI.B)
+visual_jumps(wf_GCI.A)
 ```
 
 ```{r Panel visualization}
-visual_panel(wf_GCI.B)
+visual_panel(wf_GCI.A)
 ```
 
 ## Modelling
@@ -114,7 +111,7 @@ visual_panel(wf_GCI.B)
 Choose appropiate variable to model
 
 ```{r prepare data to model}
-data_model <- data_to_model(wf_GCI.B)
+data_model <- data_to_model(wf_EOSQ118)
 
 
 ```
@@ -132,12 +129,16 @@ results <- suppressWarnings(invisible(
 ```
 
 ```{r covariate balance}
-results 
+my_matching(outcome = "y_ham",
+				   iterations = 1000,
+					matching_methods = c("CBPS.match","CBPS.weight"),
+				get_balance = TRUE)
+
 ```
 
 ### Test all variables within one jump definition
 
-```{r}
+```{r vars_to_col}
 vars_to_test <- jumps_sum_df %>% 
 	# filter(value > 10) %>%
 	select(name) %>%  
@@ -147,7 +148,7 @@ names(vars_to_test) <- vars_to_test
 vars_to_test_col <- vars_to_test
 ```
 
-```{r Test many vars, include=FALSE}
+```{r test many vars, include=FALSE}
 
 test_variables <- function(var){
 	data_model <- data_to_model({{var}}) # to trzeba poprawić
@@ -262,7 +263,7 @@ test_everything <- function(variable){
 	jumps_args_list_1 <- list(
 	is.dynamic = c(FALSE),
 	jump_years = 1:3,
-	check_years = 2:5,
+	check_years = 2:3,
 	min_jump = 
 		seq(from = 0.1,
 			by = 0.05,
@@ -270,9 +271,9 @@ test_everything <- function(variable){
 	jumps_args_list_2 <- list(
 		is.dynamic = c(TRUE),
 		jump_years = 1:3,
-		check_years = 2:5,
+		check_years = 2:3,
 		min_jump = 
-			seq(from = 0.02,
+			seq(from = 0.05,
 				by = 0.01,
 					length.out = 20)) %>% cross()
 	jumps_args_list <- append(jumps_args_list_2, jumps_args_list_1)
@@ -285,8 +286,8 @@ test_everything <- function(variable){
 		summarize(across(.cols = everything(),
 							  .fns = max)) %>% 
 		ungroup() %>% 
-		select(-cou) %>% 
-		select(where(~sum(.x)>15) & where(~sum(.x)<45) ) %>% 
+		select(-cou) %>%  
+		select(where(~sum(.x) > 20) & where(~sum(.x) < 50) ) %>% 
 		colnames()
 	
 	counts <- data_onevar %>%
@@ -373,14 +374,16 @@ final_results_sig_negative  %>%
 	select(name, value, series)
 ```
 
+### Reading files with results from folder
+
 ```{r}
 
-temp <- list.files("results_2023_12_29") 
+results_files <- list.files("results_2023_12_29") 
 
-filter_temp <- temp %>% str_remove("jumps_") %>% str_remove("_yham.xlsx")
+filter_temp <- results_files %>% str_remove("jumps_") %>% str_remove("_yham.xlsx")
 rest_to_test <- vars_to_test_col[!vars_to_test_col %in% filter_temp]
 
-final_results_read <- paste0("results_2023_12_29\\", temp) %>% 
+final_results_read <- paste0("results_2023_12_29\\", results_files) %>% 
 	map(.f = function(x){
 		sheet1 <- read_xlsx(x, sheet = "Sheet1")
 		sheet2 <- read_xlsx(x, sheet = "Sheet2")
@@ -392,10 +395,8 @@ final_results_read <- paste0("results_2023_12_29\\", temp) %>%
 				str_remove("jumps_") %>%
 				str_remove("_yham.xlsx"))
 	}) 
-
-
 ```
-
+### How significance of results is distributed?
 ```{r}
 
 final_results_sig_positive <- 
@@ -433,8 +434,8 @@ sig_pos_summary <- final_results_sig_positive  %>%
 	pivot_longer(-variable) %>% 
 	drop_na() %>% 
 	group_by(name) %>% 
-	# summarize(value = max(value, na.rm = TRUE)) %>% 
-	summarize(value = mean(value, na.rm = TRUE)) %>%
+	summarize(value = max(value, na.rm = TRUE)) %>%
+	# summarize(value = mean(value, na.rm = TRUE)) %>%
 	arrange(desc(value)) %>% 
 	left_join(dict_GCI, by = c("name" = "variables")) %>% 
 	select(name, value, series) %>% 
@@ -444,8 +445,8 @@ sig_neg_summary <- final_results_sig_negative  %>%
 	pivot_longer(-variable) %>% 
 	drop_na() %>% 
 	group_by(name) %>% 
-	# summarize(value = max(value, na.rm = TRUE)) %>% 
-	summarize(value = mean(value, na.rm = TRUE)) %>%
+	summarize(value = max(value, na.rm = TRUE)) %>%
+	# summarize(value = mean(value, na.rm = TRUE)) %>%
 	arrange(desc(value)) %>%
 	left_join(dict_GCI, by = c("name" = "variables")) %>% 
 	select(name, value, series) %>% 
@@ -455,7 +456,7 @@ all_summary <- sig_neg_summary %>%
 	left_join(sig_pos_summary,
 				 by = join_by(name, series)) %>% 
 	select(name, neg, pos, series) %>% 
-	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}")) %>% 
+	filter(!str_detect(name, "\\.\\w{1}\\.\\d{2}")) %>% 
 	arrange(desc(pos))
 
 all_summary
@@ -466,7 +467,7 @@ all_summary
 final_results_sig_positive %>% 
 	summarize(across(
 		-variable,
-		.fns = ~max(.x, na.rm = TRUE)
+		.fns = ~mean(.x, na.rm = TRUE)
 	)) %>% 
 	pivot_longer(everything()) %>% 
 	summarize(value = mean(value))
@@ -474,8 +475,159 @@ final_results_sig_positive %>%
 final_results_sig_negative %>% 
 	summarize(across(
 		-variable,
-		.fns = ~max(.x, na.rm = TRUE)
+		.fns = ~mean(.x, na.rm = TRUE)
 	)) %>% 
 	pivot_longer(everything()) %>% 
 	summarize(value = mean(value))
+```
+### Sprawdźmy jakie są oszacowania tych parametrów
+
+```{r}
+final_estimates <- final_results_read %>% 
+	map(.f = ~.x$Sheet1 %>% 
+		 	mutate(name = .x$name)) %>% 
+	reduce(bind_rows) %>% 
+	group_by(variable, name) %>% 
+	mutate(sig_pos = ifelse(`5%` > 0,1,0), 
+			 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
+	summarize(across(
+		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.fns = mean
+	)) %>% 
+	group_by(name) %>% 
+	summarize(across(
+		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.fns = mean
+	)) %>% 
+	ungroup()
+
+final_est_by_year  <- 
+	final_results_read %>%
+	map(.f = ~.x$Sheet1 %>% 
+		 	mutate(name = .x$name)) %>% 
+	reduce(bind_rows)  %>%
+	# filter(str_detect(name, "\\.\\w{1}\\.\\d{2}")) %>% 
+	filter(names == "CBPS.match") %>% 
+	separate(variable,
+				into = c("is.dynamic",
+						  "jump_years",
+						  "check_years",
+						  "min_jump"),
+				sep = "_") %>% 
+	filter(is.dynamic == 0 & min_jump > 0.25 |
+			 is.dynamic == 1 & min_jump > 0.05) %>% 
+	unite(all_of(c("is.dynamic",
+			  "jump_years",
+			  "check_years",
+			  "min_jump")),
+			col = "variable") %>% 
+	mutate(sig_pos = ifelse(`5%` > 0,1,0), 
+			 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
+	group_by(variable, name, names) %>% 
+	mutate(year = row_number()) %>% 
+	group_by(variable, name, year) %>%  
+	summarize(across(
+		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.fns = mean
+	)) %>% 
+	group_by(name, year) %>% 
+	summarize(across(
+		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.fns = mean
+	)) %>% 
+	ungroup()  %>% 
+	pivot_wider(values_from = all_of(c('estimate', 'sig_pos', 'sig_neg')), 
+					names_from = year,
+					names_glue = "{.value}_{year}") 
+
+final_est_by_year_sum <- 
+	final_est_by_year %>% 
+	mutate(across(
+		.cols = contains("estimate"),
+		.fns = ~ifelse(.x > 0, 1, 0)))
+summary(final_est_by_year_sum)
+summary(final_est_by_year)
+
+
+
+final_est_by_year %>% 
+	ggplot(aes(x = estimate_3)) + 
+	geom_histogram(bins = 15)
+```
+
+## Nie zbyt mądra próba modelowania, czy parametr ma wpływ na zmienną?
+
+```{r}
+
+final_results_sig_negative %>% 
+	pivot_longer(-variable) %>% 
+	drop_na() %>% 
+	rename(sig_neg = value) %>% 
+	left_join(final_results_sig_positive %>% 
+	 	pivot_longer(-variable) %>% 
+		drop_na() %>% 
+		rename(sig_pos = value)) %>% 
+	mutate(value = sig_pos - sig_neg) %>% 
+
+
+```
+
+```{r}
+df_test_model <- 
+	final_results_read %>% 
+	map(.f = ~.x$Sheet2) %>% 
+	map2(.y = final_results_read, 
+		  ~.x %>% cbind(name = .y$name)) %>% 
+	reduce(.f = full_join,
+			 by = join_by(variable, count, sig_positive, sig_negative, name)) %>% 
+	left_join(final_results_read %>% 
+		map(.f = ~.x$Sheet1 %>% 
+			 	mutate(name = .x$name)) %>% 
+		reduce(bind_rows) %>% 
+		group_by(variable, name) %>% 
+		mutate(sig_pos = ifelse(`5%` > 0,1,0), 
+				 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
+		summarize(across(
+			.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+			.fns = mean
+		))) %>% 
+	arrange(variable) %>% 
+	separate(variable,
+				into = c("is.dynamic",
+						  "jump_years",
+						  "check_years",
+						  "min_jump"),
+				sep = "_") %>% 
+	mutate(sig_sum = sig_positive - sig_negative) %>% 
+	mutate(across(-name,
+					  .fns = ~as.numeric(.x))) %>% 
+	mutate(sig_bin = ifelse(sig_sum > 0, 1, 0))
+
+
+```
+
+```{r}
+model_lm <- lm(estimate ~ is.dynamic +
+						factor(is.dynamic):factor(jump_years) + 
+						factor(min_jump) +
+						factor(is.dynamic):factor(check_years) +
+						factor(is.dynamic):count +
+						name,
+						data = df_test_model
+						)
+summary(model_lm)
+
+# model_glm <- glm(sig_bin ~ is.dynamic +
+# 						factor(is.dynamic):jump_years + 
+# 						factor(is.dynamic):min_jump +
+# 						factor(is.dynamic):check_years +
+# 						factor(is.dynamic):count +
+# 						name,
+# 						data = df_test_model,
+# 						family = binomial(link = "logit")
+# 						)
+# summary(model_glm)
+
+# citation("PanelMatch")
+# glue::glue_collapse(vars_to_test_col, sep = "\n")
 ```
