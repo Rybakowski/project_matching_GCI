@@ -125,10 +125,9 @@ my_matching <- function(iterations = 1000,
 								df = data_model,
 								get_balance = FALSE,
 								formula =  ~ 
-									# I(lag(pn_csh_x, 1:3)) + #Share of merchandise exports at current PPPs
+									I(lag(pn_csh_x, 1:2)) + #Share of merchandise exports at current PPPs
 									I(lag(pn_wbinf, 1:2)) + #inflation
 									I(lag(pn_csh_i, 1:2)) + #Share of gross capital formation at current PPPs
-									# I(lag(y, 1:2)) + 
 									I(lag(pn_freedom, 1:2)) + #freedom
 									I(lag(pn_csh_g, 1:2)) + #Share of government consumption at current PPPs
 									I(lag(pn_hc, 1:2)), #Human capital index, based on years of schooling and returns to education
