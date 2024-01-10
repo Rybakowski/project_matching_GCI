@@ -5,7 +5,7 @@
 ## Function output is vector.
 ## Some parameters which can determine jump definition.
 
-detect_jump <- function(
+detect_jump_old <- function(
 		vector,
 		jump_years = 3,
 		check_years = 3,
@@ -61,10 +61,10 @@ detect_jump <- function(
 	}	
 	return(vector_output)
 }
-vector <- c(1,3,3,5,3,1,1,4,4,4,4)
-detect_jump(vector = vector,
-				jump_years = 1,
-				check_years = 3)
+# vector <- c(1,3,3,5,3,1,1,4,4,4,4)
+# detect_jump(vector = vector,
+# 				jump_years = 1,
+# 				check_years = 3)
 
 ## jumps_summary---------------------------------------
 # Based on data jumps df determine how many jumps has been detected in data.
@@ -90,9 +90,10 @@ jumps_summary <- function(data = data_jumps){
 treated_columns <- function(column){
 	column <- enquo(column)	
 	filter_jumps <- data_jumps %>% 
-		select(year, cou, !!column) %>%
+		select(cou, year, !!column) %>%
 		pivot_wider(names_from = cou,
 						values_from = !!column) %>% 
+		mutate(year = as.numeric(year)) %>% 
 		select(where(~sum(.x) > 0)) %>% 
 		colnames()
 }
@@ -120,6 +121,7 @@ visual_panel <- function(column){
 				 by.timing = TRUE)
 }
 my_matching <- function(iterations = 1000,
+								periods = 2,
 								outcome = "y_ham",
 								size_match = 10,
 								df = data_model,
@@ -148,7 +150,7 @@ my_matching <- function(iterations = 1000,
 				size.match = size_match,
 				qoi = "att" ,
 				outcome.var = outcome,
-				lead = 0:2, 
+				lead = 0:periods, 
 				forbid.treatment.reversal = FALSE,
 				use.diagonal.variance.matrix = TRUE
 			)
@@ -172,7 +174,7 @@ my_matching <- function(iterations = 1000,
 			size.match = size_match,
 			qoi = "att" ,
 			outcome.var = outcome,
-			lead = 0:2, 
+			lead = 0:periods, 
 			forbid.treatment.reversal = FALSE,
 			use.diagonal.variance.matrix = TRUE
 		)
@@ -284,7 +286,7 @@ test_one_variable <- function(var,data_one = data_onevar){
 		{{var}},
 		data_one
 	)
-	results <- my_matching(iterations = 100,
+	results <- my_matching(iterations = 200,
 								  df = data_model,
 								  matching_methods = c("CBPS.match", "CBPS.weight"))
 	results_df <- tibble(results = results) %>%

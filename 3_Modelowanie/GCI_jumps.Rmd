@@ -1,4 +1,4 @@
-# GDP growth caused by GCI indicators jumps with PanelMatch package
+\# GDP growth caused by GCI indicators jumps with PanelMatch package
 
 ### Libraries
 
@@ -17,8 +17,13 @@ library(readxl)
 library(kableExtra)
 
 # data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\Nowy_projekt_BNK\2_Przetwarzanie_danych\Data_merging\database_2023_12_22.xlsx)")
+# 
+# data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\2_Przetwarzanie_danych\Data_merging\database_2023_12_29.xlsx)")
 
-data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\2_Przetwarzanie_danych\Data_merging\database_2023_12_29.xlsx)")
+data <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\2_Przetwarzanie_danych\Data_merging\database_2024_01_06.xlsx)")
+
+# temp <- data %>% 
+# 	glimpse()
 
 dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\dict_master.xlsx)",
 										sheet = "GCI") %>% 
@@ -37,25 +42,97 @@ Assume, that jump exist if:
 
 ```{r Function to detect jumps}
 
-vector <- c(1,1,3,3,3,3,3,1,3)
 
-temp <- detect_jump(vector,
-				jump_years = 1,
-				check_years = 1,
-				min_jump = 0.025)
+detect_jump <- function(
+		vector,
+		jump_years = 3,
+		check_years = 3,
+		min_jump = 0.5){
+	len_vector = length(vector)
+	vector_output <- rep(0,len_vector)
+	for (ii in 1:len_vector){
+		success <- FALSE
+		# Count years which are necessary for letter actions
+		if(len_vector -(ii+jump_years-1) <  check_years){
+			# print(ii)
+			break
+		}
+		# Jump period detecting:
+		# Remember, for example for
+		#jump period equal 2, we take vector with length 3!
+		jump_period <- vector[ii:(ii+jump_years)]
+		
+		last_check_year <- len_vector
+		# Check if in year in control period value level was lower that in the moment of jump:
+		if((ii+jump_years+check_years) < len_vector){
+			last_check_year <- (ii+jump_years+check_years)
+		}
+		#If jump_period is larger than one year, check narrower definition.
+		#If they are satisfied, go next. (maybe it would better to make recursive call here?)
+		earlier <- 0
+		# print(c("before loop", ii))
+		for(jj in (length(jump_period)-2):0){
+			jump <- jump_period[jump_years -jj + 1] - jump_period[1]
+			# print(c("jj", jj, jump))
+			# Check minimum jump
+			if(jump < min_jump){
+				next
+			}
+			# print(c("jj", jj))
+			# Check if length of vector to check is sufficient
+			if((ii+jump_years+check_years-jj-1) < len_vector){
+				last_check_year <- (ii+jump_years+check_years-jj-1)
+			}
+			# print(c("jj", jj))
+			# Check next years in case if variable drop below minimal level
+			if(any(vector[(ii+jump_years-jj):last_check_year] - jump_period[jump_years-jj] < 0)){
+				# print(ii)
+				next
+			}
+			earlier <- jj
+			success <- TRUE
+			# print(c("jj", jj))
+			break
+		}
+		# Indicate values of binary vector
+		if(success){
+			vector_output[(ii+jump_years - earlier):len_vector] <- 1
+			break
+		}
+	}
+	# print(c(ii))
+	return(vector_output)
+}
 
-temp
+vector <- c(10,-4,-3.5,10,-3,5,10,10,10,10)
+
+detect_jump(vector,
+				jump_years = 4,
+				check_years = 2,
+				min_jump = 1)
+
+
 ```
 
 ```{r Calculating jumps}
 
 data_wf <- data %>% 
-	select(cou, year, starts_with("wf")) 
+	# mutate(year = as.numeric(year)) %>% 
+	select(cou, year, starts_with("wf"))
 
-data_group <- data_wf %>%
-	select(-wf_TBPC) %>% #zmienna przyjmuje wartość zero
+to_scale <- data_wf %>% 
+	select(where(~min(.x) < 1) | where(~max(.x) > 7)) %>% 
+	colnames()
+to_scale <- setdiff(to_scale, c("cou","year"))
+
+data_group <- data_wf %>%#zmienna przyjmuje wartość zero
+	mutate(across(.cols = all_of(to_scale),
+					  .fns = ~(.x - min(.x))/(max(.x) - min(.x)))) %>% 
+	mutate(across(.cols = all_of(to_scale),
+					  .fns = ~(.x + 1)*3.5)) %>% 
 	group_by(cou) %>%
-	arrange(cou, year)
+	arrange(cou, year) 
+
 
 data_dynamics <- data_group %>% 
 	mutate(across(
@@ -67,16 +144,27 @@ data_dynamics <- data_group %>%
 		.cols = starts_with("wf"),
 		.fns = ~ purrr::accumulate(.x, \(acc, nxt) acc*nxt)
 	)) 
+# to_remove_dym <- data_dynamics %>% 
+# 	filter(if_any(.fns = list(is.infinite, is.na))) %>% 
+# 	ungroup() %>% 
+# 	select(where(~any(is.infinite(.x)))) %>%
+# 	colnames()
+# 
+# 
+# data_dynamics <- data_dynamics %>% 
+# 	select(-all_of(to_remove_dym))
+
 ```
 
 ```{r, choosing jumps}
 jumps_args <- list(
-				is.dynamic = FALSE,
+				is.dynamic = TRUE,
 				jump_years = 2,
 				check_years = 2,
-				min_jump = 0.25)
+				min_jump = 0.065)
 
 data_jumps <- jump_data_proces(jumps_args)
+
 
 ```
 
@@ -121,9 +209,10 @@ Perform matching
 ```{r Panel Match, include = FALSE}
 
 results <- suppressWarnings(invisible(
-	my_matching(outcome = "y_ham_d",
+	my_matching(outcome = "y_ham",
 				   iterations = 1000,
-					matching_methods = c("CBPS.match","CBPS.weight"))
+					matching_methods = c("CBPS.match","CBPS.weight"),
+					periods = 3)
 	))
 
 ```
@@ -139,9 +228,9 @@ results
 ### Test all variables within one jump definition
 
 ```{r vars_to_col}
-vars_to_test <- jumps_sum_df %>% 
+vars_to_test <- dict_GCI %>% 
 	# filter(value > 10) %>%
-	select(name) %>%  
+	select(variables) %>%  
 	unlist()
 # vars_to_test
 names(vars_to_test) <- vars_to_test
@@ -270,10 +359,10 @@ test_everything <- function(variable){
 	# 			length.out = 20)) %>% cross()
 	jumps_args_list_2  <- list(
 		is.dynamic = c(TRUE),
-		jump_years = 1:3,
+		jump_years = 1:2,
 		check_years = 2:3,
 		min_jump =
-			seq(from = 0.035,
+			seq(from = 0.05,
 				by = 0.005,
 					length.out = 24)) %>% cross()
 	# jumps_args_list <- append(jumps_args_list_2, jumps_args_list_1)
@@ -326,13 +415,15 @@ test_everything <- function(variable){
 		arrange(desc(sig_positive)) 
 		
 	list_to_save <- list(all_df, all_df_summary)
-	writexl::write_xlsx(list_to_save, paste0("results_2024_01_05/jumps_",variable,"_yham_d.xlsx"))
+	writexl::write_xlsx(list_to_save, paste0("results_2024_01_05/jumps_20240106_",variable,"_yham.xlsx"))
 	return(list(df = all_df_summary, name = variable))
 }
  
 
 plan(multisession, workers = 8)
-final_results <- future_map(c("wf_GCI.A.04","wf_GCI.B" ), safely(test_everything), .progress = TRUE,
+
+filars_only <- vars_to_test_col[vars_to_test_col %>% str_detect("GCI")]
+final_results <- future_map(  , safely(test_everything), .progress = TRUE,
 			  .options = furrr_options(seed = 123))
 print("finish")
 
@@ -379,12 +470,12 @@ final_results_sig_negative  %>%
 
 ```{r}
 
-results_files <- list.files("results_2023_12_29") 
+results_files <- list.files("results_2024_01_05") 
 
 filter_temp <- results_files %>% str_remove("jumps_") %>% str_remove("_yham.xlsx")
 rest_to_test <- vars_to_test_col[!vars_to_test_col %in% filter_temp]
 
-final_results_read <- paste0("results_2023_12_29\\", results_files) %>% 
+final_results_read <- paste0("results_2024_01_05\\", results_files) %>% 
 	map(.f = function(x){
 		sheet1 <- read_xlsx(x, sheet = "Sheet1")
 		sheet2 <- read_xlsx(x, sheet = "Sheet2")
@@ -392,7 +483,8 @@ final_results_read <- paste0("results_2023_12_29\\", results_files) %>%
 			Sheet1 = sheet1,
 			Sheet2 = sheet2,
 			name = x %>% 
-				str_remove("results_2023_12_29\\\\") %>% 
+				str_remove("results_2024_01_05\\\\") %>% 
+				str_remove("20240106_") %>%
 				str_remove("jumps_") %>%
 				str_remove("_yham.xlsx"))
 	}) 
@@ -459,8 +551,8 @@ all_summary <- sig_neg_summary %>%
 	left_join(sig_pos_summary,
 				 by = join_by(name, series)) %>% 
 	select(name, neg, pos, series) %>% 
-	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}")) %>% 
-	arrange(desc(pos))
+	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI|EOSQ")) %>% 
+	arrange(desc(neg))
 
 all_summary
 
@@ -484,7 +576,7 @@ final_results_sig_negative %>%
 	summarize(value = mean(value))
 ```
 
-### Sprawdźmy jakie są oszacowania tych parametrów
+### Let's see...
 
 ```{r}
 final_estimates <- final_results_read %>% 
@@ -509,9 +601,10 @@ final_est_by_year  <-
 	final_results_read %>%
 	map(.f = ~.x$Sheet1 %>% 
 		 	mutate(name = .x$name)) %>% 
-	reduce(bind_rows)  %>%
+	reduce(bind_rows) %>%
+	filter(count > 20) %>% 
 	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI")) %>%
-	# filter(names == "CBPS.match") %>% 
+	filter(names == "CBPS.match") %>%
 	separate(variable,
 				into = c("is.dynamic",
 						  "jump_years",
@@ -519,29 +612,35 @@ final_est_by_year  <-
 						  "min_jump"),
 				sep = "_") %>% 
 	# filter(is.dynamic == 0 & min_jump > 0.25) %>%
-	filter(is.dynamic == 1 & min_jump > 0.05) %>%
+	filter(is.dynamic == 1 & min_jump >= 0.05) %>%
 	unite(all_of(c("is.dynamic",
 			  "jump_years",
 			  "check_years",
 			  "min_jump")),
 			col = "variable") %>% 
 	mutate(sig_pos = ifelse(`5%` > 0,1,0), 
-			 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
+			 sig_neg = ifelse(`95%` < 0, 1,0)) %>%
+	group_by(name) %>% 
+	mutate(count_defs = accumulate(variable,
+						.f = append)) %>% 
+	mutate(count_defs = map(count_defs,
+						.f = ~unique(.x) %>% length())) %>% 
+	mutate(count_defs = max(unlist(count_defs))) %>% 
 	group_by(variable, name, names) %>% 
 	mutate(year = row_number()) %>% 
-	group_by(variable, name, year) %>%  
+	group_by(variable, name, year, count_defs) %>%  
 	summarize(across(
 		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
 		.fns = mean
 	)) %>% 
-	group_by(name, year) %>% 
+	group_by(name, year, count_defs) %>% 
 	summarize(across(
 		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
 		.fns = mean
 	)) %>% 
 	ungroup()  %>% 
 	pivot_wider(values_from = all_of(c('estimate', 'sig_pos', 'sig_neg')), 
-					names_from = year,
+					names_from = 'year',
 					names_glue = "{.value}_{year}") 
 
 final_est_by_year_sum <- 
@@ -552,20 +651,43 @@ final_est_by_year_sum <-
 summary(final_est_by_year_sum)
 summary(final_est_by_year)
 
+# final_est_by_year %>% 
+# 	filter(if_any(.cols = everything(),
+# 					  .fns = ~ is.na(.x)))
 
 final_est_by_year %>% 
 	ggplot(aes(x = estimate_3)) + 
-	geom_histogram(bins = 15)
-
-
+	geom_histogram(
+		bins = 20,
+		aes(y = after_stat(count),
+			 alpha = 0.5),
+		show.legend = FALSE) +
+	stat_density(geom = "line",
+					 aes(y = ..count.. *0.01)) +
+	geom_rug() +
+	xlim(c(-0.08,0.08)) +
+	theme_bw() +
+	theme(legend.key = element_blank(),
+			legend.text = element_blank(),
+			axis.title.x = element_blank(),
+			axis.title.y = element_blank())
 ```
+
 ### Some tables to article
+
 ```{r summary tables}
 table_by_year_sum <- final_est_by_year %>% 
 	select(-name) %>% 
 	summarize(across(
-		.cols = everything(),
+		.cols = -c(count_defs),
 		.fns = mean))  %>% 
+	# cbind(
+		# final_est_by_year %>% 
+		# 	select(-name) %>% 
+		# 	summarize(across(
+		# 		.cols = -c(count_defs),
+		# 		.fns = ~median(.x))) %>% 
+		# 	rename_with(.fn = ~paste0("w.",.x))) %>% 
 	cbind(
 		final_est_by_year %>% 
 			mutate(across(
@@ -585,19 +707,20 @@ table_by_year_sum <- final_est_by_year %>%
 # writexl::write_xlsx(table_by_year_sum, "table_by_year_sum.xlsx")
 
 ```
+
 ## Nie zbyt mądra próba modelowania, czy parametr ma wpływ na zmienną?
 
 ```{r}
 
-final_results_sig_negative %>% 
-	pivot_longer(-variable) %>% 
-	drop_na() %>% 
-	rename(sig_neg = value) %>% 
-	left_join(final_results_sig_positive %>% 
-	 	pivot_longer(-variable) %>% 
-		drop_na() %>% 
-		rename(sig_pos = value)) %>% 
-	mutate(value = sig_pos - sig_neg) 
+# final_results_sig_negative %>% 
+# 	pivot_longer(-variable) %>% 
+# 	drop_na() %>% 
+# 	rename(sig_neg = value) %>% 
+# 	left_join(final_results_sig_positive %>% 
+# 	 	pivot_longer(-variable) %>% 
+# 		drop_na() %>% 
+# 		rename(sig_pos = value)) %>% 
+# 	mutate(value = sig_pos - sig_neg) 
 
 table_results <- final_est_by_year %>% 
 	left_join(dict_GCI, by = c("name" = "variables")) %>% 
@@ -607,17 +730,17 @@ table_results <- final_est_by_year %>%
 					  .names = "rank_{.col}")) %>% 
 	select(name, series, contains("sig_pos"), everything()) %>%
 	arrange(desc(sig_pos_3)) %>% 
-	filter(rank_sig_pos_3 < 9 |
-			 	name %in% c("wf_GCI.A.04", "wf_GCI.B.05")) %>% 
- 	select(name, letters[1:4], series, matches("estimate"), ) %>% 
+	filter(rank_sig_pos_3 < 6 |
+			 	name %in% c("wf_GCI.B.05.01", "wf_GCI.B.05")) %>% 
+ 	select(name, count_defs, letters[1:4], series, matches("estimate"), matches("^sig_pos")) %>% 
 	left_join(dict_GCI %>% 
 				 	filter(is.na(c)) %>% 
 				 	select(a,b, series), by = c("a","b")) %>% 
 	mutate(series.x = ifelse(series.x == series.y, series.x
 									 , paste0(series.y, " ", series.x))) %>% 
-	select(series.x, matches("estimate"), matches("^sig_pos"))
+	select(series.x, count_defs, matches("estimate"), matches("^sig_pos"))
 # write_xlsx(table_results, "table_results3.xlsx")
-
+table_results
 
 ```
 
@@ -665,7 +788,8 @@ model_lm <- lm(estimate ~
 						factor(min_jump) +
 						name,
 						data = df_test_model %>% 
-						filter(is.dynamic == 1)
+						filter(is.dynamic == 1) %>% 
+						filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI|EOSQ"))
 						)
 summary(model_lm)
 
