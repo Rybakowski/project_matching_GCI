@@ -62,6 +62,8 @@ GCI_na <- naniar::miss_var_summary(GCI_df) %>%
 	unlist() %>% 
 	unname()
 
+GCI_na_2 <- setdiff(colnames(GCI_df), c("wf_EOSQ168", "cou","year"))
+
 temp <- naniar::miss_case_summary(GCI_df)
 
 to_filter <- temp %>%
@@ -70,13 +72,13 @@ to_filter <- temp %>%
 	unlist()
 
 countries_to_rem <- GCI_df %>% 
-	select(cou, year, all_of(GCI_na)) %>% # selecting only fool dataset
+	select(cou, year, all_of(GCI_na)) %>% # selecting only full dataset
 	slice(to_filter) %>% 
 	distinct(cou) %>% 
 	unlist() 
 
 GCI_df2 <- GCI_df %>% 
-	select(cou, year, all_of(GCI_na)) %>% # selecting only fool dataset
+	select(cou, year, all_of(GCI_na_2)) %>% # selecting only full dataset
 	filter(!cou %in% countries_to_rem)
 
 PENN_df <-  PENN_raw %>%  
@@ -115,7 +117,7 @@ data_df <- GCI_df2 %>%
 	mutate(year = as.numeric(year)) %>% 
 	left_join(PENN_df_2, by = c("cou", "year")) %>%
 	left_join(tymek_df, by = c("cou", "year")) %>% 
-	filter(!cou %in% c("ARG","TWN","ZWE", "VEN", "AZE", "GEO", "MKD", "MNE", "OMN", "TCD")) %>% 
+	filter(!cou %in% c("ARG","TWN","ZWE", "VEN", "AZE", "GEO", "MKD", "MNE", "OMN", "TCD", "MLT","BOL", "CYP")) %>% 
 	select(year, cou, everything()) %>% 
 	arrange(cou, year) #%>% 
 	# select(cou, year, pn_wbinf, pn_freedom) %>%
@@ -136,12 +138,23 @@ countries_final <- data_df %>%
 	
 dict_final <- list(countries = countries_final,
 						 GCI = dict_new)
-# 
-# data_df %>% 
-# 	distinct(cou) %>% 
-# 	nrow()
 
-# write_xlsx(data_df, "database_2023_12_29.xlsx")
+data_df_2 <- data_df %>% 
+	mutate(year = as.character(year)) %>% 
+	pivot_longer(where(is.numeric)) %>% 
+	group_by(cou, name) %>% 
+	tidyr::fill(value, .direction = "downup") %>% 
+	pivot_wider()
+
+# write_xlsx(data_df_2, "database_2024_01_06.xlsx")
 
 # write_xlsx(dict_final, "dict_master.xlsx")
+# write_xlsx(countries_final, "countries_final.xlsx")
+
+# check_GCI <- data_df %>% 
+# 	# filter(cou %in% countries_final$cou) %>% 
+# 	select(cou, year, where(~any(is.na(.x)))) %>%
+# 	# select(-wf_EOSQ168) %>% 
+# 	group_by(cou) #%>% 
+# 	naniar::miss_var_summary()
 
