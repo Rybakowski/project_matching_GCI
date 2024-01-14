@@ -30,6 +30,10 @@ dict_GCI <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_
 	mutate(variables = paste0("wf_", variables))
 
 dict_cou <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\dict_master.xlsx)")
+
+dict_hier <- readxl::read_xlsx(r"(C:\Users\rados\OneDrive - SGH\project_matching_GCI\dict_hierarchical.xlsx)",
+										 sheet = "Sheet1")
+
 ```
 
 ## Function to detect a jump
@@ -42,15 +46,86 @@ Assume, that jump exist if:
 
 ```{r Function to detect jumps}
 
+detect_jump <- function(
+		vector,
+		jump_years = 3,
+		check_years = 3,
+		min_jump = 0.5){
+	#version with results 2024-01-13
+	len_vector = length(vector)
+	vector_output <- rep(0,len_vector)
+	for (ii in 1:len_vector){
+		success <- FALSE
+		# Count years which are necessary for letter actions
+		if(len_vector -(ii+jump_years-1) <  check_years){
+			# print(ii)
+			break
+		}
+		# Jump period detecting:
+		# Remember, for example for
+		#jump period equal 2, we take vector with length 3!
+		jump_period <- vector[ii:(ii+jump_years)]
+		
+		last_check_year <- len_vector
+		# Check if in year in control period value level was lower that in the moment of jump:
+		if((ii+jump_years+check_years) < len_vector){
+			last_check_year <- (ii+jump_years+check_years)
+		}
+		#If jump_period is larger than one year, check narrower definition.
+		#If they are satisfied, go next. (maybe it would better to make recursive call here?)
+		earlier <- 0
+		# print(c("before loop", ii))
+		for(jj in (length(jump_period)-2):0){
+			jump <- jump_period[jump_years -jj + 1] - jump_period[1]
+			# print(c("jj", jj, jump))
+			# Check minimum jump
+			if(jump < min_jump){
+				next
+			}
+			# print(c("jj", jj))
+			# Check if length of vector to check is sufficient
+			if((ii+jump_years+check_years-jj-1) < len_vector){
+				last_check_year <- (ii+jump_years+check_years-jj-1)
+				#Attention 1 at the end modify function so we evaluate with level before reform
+			}
+			# print(c("jj", jj))
+			# print(list((ii+jump_years-jj):last_check_year, jump_period))
+			# Check next years in case if variable drop below minimal level
+			if(any(vector[(ii+jump_years-jj):last_check_year] - jump_period[jump_years-jj] < 0)){
+				# print(ii)
+				next
+			}
+			earlier <- jj
+			success <- TRUE
+			# print(c("jj", jj))
+			break
+		}
+		# Indicate values of binary vector
+		if(success){
+			vector_output[(ii+jump_years - earlier):len_vector] <- 1
+			break
+		}
+	}
+	# print(c(ii))
+	return(vector_output)
+}
+
+df <- tibble(
+	v1 =  c(1,1,2,1,0,0,0,1,2,2),
+	v2 =  c(1,1,2,2,1,0,0,1,2,2),
+	v3 =  c(1,1,1,2,1,0,0,0,2,2)
+)
+
+df %>% 
+	mutate(across(
+		.cols = everything(),
+		.fns = detect_jump, 
+		jump_years  = 2,
+		min_jump = 1,
+		check_years = 3
+	))
 
 
-
-vector <- c(10,-4,-3.5,10,-3,5,10,10,10,10)
-
-detect_jump(vector,
-				jump_years = 4,
-				check_years = 2,
-				min_jump = 1)
 
 
 ```
@@ -101,8 +176,8 @@ data_dynamics <- data_group %>%
 jumps_args <- list(
 				is.dynamic = TRUE,
 				jump_years = 2,
-				check_years = 2,
-				min_jump = 0.065)
+				check_years = 3,
+				min_jump = 0.05)
 
 data_jumps <- jump_data_proces(jumps_args)
 
@@ -120,7 +195,7 @@ jumps_sum_df
 ## Jumps visualization
 
 ```{r countries_treated}
-filter_jumps <- treated_columns(wf_GCI.A)
+filter_jumps <- treated_columns(wf_GCI)
 dict_cou %>% 
 	filter(cou %in% filter_jumps) %>% 
 	select(cou, country)
@@ -128,11 +203,11 @@ dict_cou %>%
 ```
 
 ```{r countries jumps line plot}
-visual_jumps(wf_GCI.A)
+visual_jumps(wf_GCI)
 ```
 
 ```{r Panel visualization}
-visual_panel(wf_GCI.A)
+visual_panel(wf_GCI)
 ```
 
 ## Modelling
@@ -140,7 +215,7 @@ visual_panel(wf_GCI.A)
 Choose appropiate variable to model
 
 ```{r prepare data to model}
-data_model <- data_to_model(wf_GCI.A)
+data_model <- data_to_model(wf_GCI)
 
 # write_xlsx(data_model, "temp.xlsx")
 ```
@@ -153,13 +228,13 @@ results <- suppressWarnings(invisible(
 	my_matching(outcome = "y_ham",
 				   iterations = 1000,
 					matching_methods = c("CBPS.match","CBPS.weight"),
-					periods = 3)
+					periods = 2)
 	))
 
 ```
 
 ```{r covariate balance}
-my_matching(outcome = "y_ham_d",
+my_matching(outcome = "y_ham",
 				   iterations = 1000,
 					matching_methods = c("CBPS.match","CBPS.weight"),
 				get_balance = TRUE)
@@ -528,24 +603,25 @@ final_estimates <- final_results_read %>%
 	mutate(sig_pos = ifelse(`5%` > 0,1,0), 
 			 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
 	summarize(across(
-		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.cols = all_of(c('5%', '95%','estimate', 'sig_pos', 'sig_neg')),
 		.fns = mean
 	)) %>% 
 	group_by(name) %>% 
 	summarize(across(
-		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
+		.cols = all_of(c('5%', '95%','estimate', 'sig_pos', 'sig_neg')),
 		.fns = mean
 	)) %>% 
 	ungroup()
 
-final_est_by_year  <- 
+final_est  <- 
 	final_results_read %>%
 	map(.f = ~.x$Sheet1 %>% 
 		 	mutate(name = .x$name)) %>% 
 	reduce(bind_rows) %>%
-	filter(count > 20) %>% 
-	# filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI")) %>%
-	# filter(names == "CBPS.match") %>%
+	filter(count >= 20) %>% 
+	filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI")) %>%
+	# filter(str_detect(name, "EOS")) %>%
+	filter(names == "CBPS.weight") %>%
 	separate(variable,
 				into = c("is.dynamic",
 						  "jump_years",
@@ -554,13 +630,14 @@ final_est_by_year  <-
 				sep = "_") %>% 
 	# filter(is.dynamic == 0 & min_jump > 0.25) %>%
 	filter(is.dynamic == 1 & min_jump >= 0.05) %>%
+	filter(check_years == 3) %>% 
 	unite(all_of(c("is.dynamic",
 			  "jump_years",
 			  "check_years",
 			  "min_jump")),
 			col = "variable") %>% 
 	mutate(sig_pos = ifelse(`5%` > 0,1,0), 
-			 sig_neg = ifelse(`95%` < 0, 1,0)) %>%
+			 sig_neg = ifelse(`95%` < 0, 1,0)) %>% 
 	group_by(name) %>% 
 	mutate(count_defs = accumulate(variable,
 						.f = append)) %>% 
@@ -568,7 +645,10 @@ final_est_by_year  <-
 						.f = ~unique(.x) %>% length())) %>% 
 	mutate(count_defs = max(unlist(count_defs))) %>% 
 	group_by(variable, name, names) %>% 
-	mutate(year = row_number()) %>% 
+	mutate(year = row_number()) 
+	 
+	
+final_est_by_year <- final_est %>% 
 	group_by(variable, name, year, count_defs) %>%  
 	summarize(across(
 		.cols = all_of(c('estimate', 'sig_pos', 'sig_neg')),
@@ -596,22 +676,6 @@ summary(final_est_by_year)
 # 	filter(if_any(.cols = everything(),
 # 					  .fns = ~ is.na(.x)))
 
-final_est_by_year %>% 
-	ggplot(aes(x = estimate_3)) + 
-	geom_histogram(
-		bins = 20,
-		aes(y = after_stat(count),
-			 alpha = 0.5),
-		show.legend = FALSE) +
-	stat_density(geom = "line",
-					 aes(y = ..count.. *0.01)) +
-	geom_rug() +
-	xlim(c(-0.08,0.08)) +
-	theme_bw() +
-	theme(legend.key = element_blank(),
-			legend.text = element_blank(),
-			axis.title.x = element_blank(),
-			axis.title.y = element_blank())
 
 ```
 
@@ -624,12 +688,12 @@ table_by_year_sum <- final_est_by_year %>%
 		.cols = -c(count_defs),
 		.fns = mean))  %>% 
 	# cbind(
-		# final_est_by_year %>% 
-		# 	select(-name) %>% 
-		# 	summarize(across(
-		# 		.cols = -c(count_defs),
-		# 		.fns = ~median(.x))) %>% 
-		# 	rename_with(.fn = ~paste0("w.",.x))) %>% 
+	# final_est_by_year %>%
+	# 	select(-name) %>%
+	# 	summarize(across(
+	# 		.cols = -c(count_defs),
+	# 		.fns = ~weighted.mean(.x,count_defs))) %>%
+	# 	rename_with(.fn = ~paste0("w.",.x))) %>%
 	cbind(
 		final_est_by_year %>% 
 			mutate(across(
@@ -646,7 +710,7 @@ table_by_year_sum <- final_est_by_year %>%
 		names_to = c(".value", "period"),
 		names_pattern = "(.+?)_(\\d)") 
 
-# writexl::write_xlsx(table_by_year_sum, "table_by_year_sum.xlsx")
+# writexl::write_xlsx(table_by_year_sum, "table_by_year_sum_2024_01_13.xlsx")
 
 ```
 
@@ -663,28 +727,237 @@ table_by_year_sum <- final_est_by_year %>%
 # 		drop_na() %>% 
 # 		rename(sig_pos = value)) %>% 
 # 	mutate(value = sig_pos - sig_neg) 
+pilar_1_to_rem <- dict_GCI %>% 
+	filter(str_detect(variables, "GCI")) %>% 
+	filter(!is.na(b) & is.na(c)) %>% 
+	select(series) %>% 
+	unlist() 
 
 table_results <- final_est_by_year %>% 
-	left_join(dict_GCI, by = c("name" = "variables")) %>% 
-	select(name, series, everything()) #%>% 
-	mutate(across(.cols = contains("sig_pos"),
-					  .fns = ~rank(-.x, ties.method = "last"),
-					  .names = "rank_{.col}")) %>% 
-	select(name, series, contains("sig_pos"), everything()) %>%
-	arrange(desc(sig_pos_3)) %>% 
-	filter(rank_sig_pos_3 < 6 |
-			 	name %in% c("wf_GCI.B.05.01", "wf_GCI.B.05")) %>% 
- 	select(name, count_defs, letters[1:4], series, matches("estimate"), matches("^sig_pos")) %>% 
-	left_join(dict_GCI %>% 
-				 	filter(is.na(c)) %>% 
-				 	select(a,b, series), by = c("a","b")) %>% 
-	mutate(series.x = ifelse(series.x == series.y, series.x
-									 , paste0(series.y, " ", series.x))) %>% 
-	select(series.x, count_defs, matches("estimate"), matches("^sig_pos"))
+	full_join(dict_GCI %>% 
+				 	filter(str_detect(variables, "GCI")),
+				 by = c("name" = "variables")) %>% 
+	select(name, series, everything()) %>%
+	left_join(dict_hier %>% 
+				 	select(matches("name_[234]")),
+				 by = c("series_unindented" = "name_4")) %>% 
+	unite(c(name_2, name_3,series_unindented), 
+			col = "series_unindented", 
+			sep = ", ",
+			na.rm = TRUE) %>% 
+	left_join(dict_hier %>%
+				 	select(matches("name_[23]"))%>% 
+				 	distinct(),
+				 by = c("series_unindented" = "name_3")) %>% 
+	unite(c(name_2, series_unindented), 
+			col = "series_unindented", 
+			sep = ", ",
+			na.rm = TRUE)
+
+table_results_2 <- table_results %>% 
+	mutate(b = ifelse(is.na(b), 0, b)) %>% 
+	arrange(a,b,series_unindented) %>% 
+	extract(series_unindented, 
+			  regex = "(\\d{1,2})\\w{2,3} pillar: ", 
+			  into = "pilar",
+			  remove = FALSE) %>% 
+	mutate(series_unindented = ifelse(series_unindented %in% pilar_1_to_rem,
+												 series_unindented,
+												 str_remove(series_unindented, "^\\d{1,2}.+?,\\s"))) %>% 
+	select(a,pilar, series_unindented, count_defs, matches("estimate"), matches("^sig_pos"))
+# exp(0.0098)
+
+table_results_3 <- table_results %>%
+	group_by(name) %>% 
+	mutate(max_sig = max(c_across(contains("sig_pos")))) %>% 
+	mutate(min_sig = max(c_across(contains("sig_neg")))) %>% 
+	arrange(desc(max_sig)) %>% 
+	head(15) %>% 
+	mutate(b = ifelse(is.na(b), 0, b)) %>% 
+	arrange(a,b,series_unindented) %>% 
+	extract(series_unindented, 
+			  regex = "(\\d{1,2})\\w{2,3} pillar: ", 
+			  into = "pilar",
+			  remove = FALSE) %>% 
+	mutate(series_unindented = ifelse(series_unindented %in% pilar_1_to_rem,
+												 series_unindented,
+												 str_remove(series_unindented, "^\\d{1,2}.+?,\\s"))) %>% 
+	select(a,pilar, series_unindented, count_defs, matches("estimate"), matches("^sig_pos"))
+	# mutate(across(.cols = contains("sig_pos"),
+	# 				  .fns = ~rank(-.x, ties.method = "last"),
+	# 				  .names = "rank_{.col}")) %>%
+	# select(name, series, contains("sig_pos"), everything()) %>%
+	# arrange(desc(sig_pos_3)) #%>%
+# 	filter(rank_sig_pos_3 < 6 |
+# 			 	name %in% c("wf_GCI.B.05.01", "wf_GCI.B.05")) %>% 
+#  	select(name, count_defs, letters[1:4], series, matches("estimate"), matches("^sig_pos")) %>% 
+# 	left_join(dict_GCI %>% 
+# 				 	filter(is.na(c)) %>% 
+# 				 	select(a,b, series), by = c("a","b")) %>% 
+# 	mutate(series.x = ifelse(series.x == series.y, series.x
+# 									 , paste0(series.y, " ", series.x))) %>% 
+# 	select(series.x, count_defs, matches("estimate"), matches("^sig_pos")) 
+		
 # write_xlsx(table_results, "table_results3.xlsx")
-# write_xlsx(table_results, "table_results_full_2024_01_11.xlsx")
+# write_xlsx(table_results_3, "table_results_full_2024_01_11_head.xlsx")
+```
+### Plots:
+```{r plots - histogram}
+final_est_by_year %>% 
+	ggplot(aes(x = estimate_3)) + 
+	geom_histogram(
+		bins = 20,
+		aes(y = after_stat(count),
+			 alpha = 0.5),
+		show.legend = FALSE) +
+	stat_density(geom = "line",
+					 aes(y = ..count.. *0.01)) +
+	geom_rug() +
+	xlim(c(-0.08,0.08)) +
+	theme_bw() +
+	theme(legend.key = element_blank(),
+			legend.text = element_blank(),
+			axis.title.x = element_blank(),
+			axis.title.y = element_blank())
+```
+```{r ribbons}
+df_errorbars <- final_est %>% 
+	group_by(variable, name, year, count_defs) %>%  
+	summarize(across(
+		.cols = all_of(c('5%', '95%', 'estimate')),
+		.fns = mean
+	)) %>% 
+	group_by(name, year, count_defs) %>% 
+	summarize(across(
+		.cols = all_of(c('5%', '95%', 'estimate')),
+		.fns = mean
+	)) %>% 
+	mutate(name = as.factor(name)) %>% 
+	left_join(dict_GCI %>% 
+				 	filter(str_detect(variables, "GCI")),
+				 by = c("name" = "variables")) %>% 
+	filter(is.na(b)) %>% 
+	rename(lower = `5%`, 
+			 upper = `95%`) %>% 
+	mutate(year = as.factor(year -1)) %>% 
+	ungroup() %>% 
+	left_join(dict_hier %>% 
+				 	distinct(name_1, trans_1),
+				 by = c("series" = "name_1")) %>%
+	mutate(group = as.factor(paste0(a,". ",trans_1))) %>% 
+	ungroup() %>% 
+	mutate(grid = ifelse(row_number()>6, "B-C","GCI-A")) %>% 
+	mutate(grid = factor(grid))
+	
+
+# glimpse(df_errorbars)
+
+p <- ggplot(df_errorbars, 
+				aes(x = year, 
+					 y = estimate,
+					 color = group)) +
+	geom_point(aes(shape = group),
+				  alpha = 0.9,
+				  size = 5) +
+	geom_line(aes(group = group)) +
+	geom_errorbar(aes(ymin = lower, ymax = upper), 
+					  width = 0.2,
+					  alpha = 0.9) +
+	theme_minimal() +
+	scale_shape_manual(values = c(15:19)) +
+	labs(x = "Lata po reformie") +
+	geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.5) +
+	theme(axis.title.y = element_blank(),
+			text = element_text(family = "serif", size = 16),
+			legend.title = element_text(size = 16, face = "bold"),
+			axis.text.x = element_text(color = "black")) +
+	facet_wrap(vars(grid)) +
+	ylim(c(-0.1,0.1)) +
+	 guides(
+    color = guide_legend(title = "Główne agregaty", override.aes = list(linewidth  = NA)),
+    shape = guide_legend(title = "Główne agregaty"),
+    alpha = FALSE)
+p
+
+
+ggsave(filename = "main_aggs.png", plot = p, device = "png",
+		 width = 10,
+		 height = 4,
+		 scale = 1)
+
+
 ```
 
+
+
+```{r ribbons2}
+df_errorbars2 <- final_est %>% 
+	group_by(variable, name, year, count_defs) %>%  
+	summarize(across(
+		.cols = all_of(c('5%', '95%', 'estimate')),
+		.fns = mean
+	)) %>% 
+	group_by(name, year, count_defs) %>% 
+	summarize(across(
+		.cols = all_of(c('5%', '95%', 'estimate')),
+		.fns = mean
+	)) %>% 
+	mutate(name = as.factor(name)) %>% 
+	left_join(dict_GCI %>% 
+				 	filter(str_detect(variables, "GCI")),
+				 by = c("name" = "variables")) %>% 
+	left_join(dict_hier %>% 
+				 	distinct(name_2, trans_2),
+				 by = c("series" = "name_2")) %>%  
+	filter(is.na(c)&!is.na(b)) %>% 
+	rename(lower = `5%`, 
+			 upper = `95%`) %>% 
+	mutate(year = as.factor(paste0("t+",year -1))) %>% 
+	mutate(group = as.factor(trans_2)) %>% 
+	ungroup() %>% 
+	group_by(name) %>% 
+
+	extract(series_unindented, 
+			  regex = "(\\d{1,2})\\w{2,3} pillar: ", 
+			  into = "pilar",
+			  remove = FALSE) %>% 
+	mutate(grid = floor((as.numeric(pilar)-1)/2)) %>% 
+	mutate(grid = paste0(((grid)*2+1),"-",(grid)*2+2)) %>% 
+	mutate(grid = as.factor(grid))
+# glimpse(df_errorbars)
+
+p2 <- ggplot(df_errorbars2, 
+				aes(x = year, 
+					 y = estimate,
+					 color = group)) +
+	geom_point(aes(shape = group),
+				  size = 3) +
+	geom_line(aes(group = group)) +
+	geom_errorbar(aes(ymin = lower, ymax = upper), 
+					  width = 0.2,
+					  alpha = 0.8) +
+	theme_minimal() +
+	labs(x = "Lata po reformie") +
+	geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.5) +
+	scale_shape_manual(values = c(15:26)) +
+	scale_color_manual(values = rep(c("red","blue"),6)) +
+	theme(axis.title.y = element_blank(),
+			text = element_text(family = "serif", size = 16),
+			legend.title = element_text(size = 16, face = "bold"),
+			axis.text.x = element_text(color = "black")) +
+	ylim(c(-0.1,0.1)) +
+	# plot.margin = margin(1, 1, 1, 1, "cm") +
+	guides(
+    color = guide_legend(title = "Filary GCI", override.aes = list(linewidth  = NA)),
+    shape = guide_legend(title = "Filary GCI"),
+    alpha = FALSE) +
+	facet_wrap(vars(grid))
+
+ggsave(filename = "pilars_aggs.png", plot = p2, device = "png",
+		 width = 10,
+		 height = 5)
+p2
+```
 ```{r}
 df_test_model <- 
 	final_results_read %>% 
@@ -724,13 +997,13 @@ model_lm <- lm(estimate ~
 						# factor(min_jump) +
 						# factor(is.dynamic):factor(check_years) +
 						# factor(is.dynamic):count +
-						factor(check_years) +
+						# factor(check_years) +
 						count +
-						factor(min_jump) +
+						min_jump +
 						name,
 						data = df_test_model %>% 
 						filter(is.dynamic == 1) %>% 
-						filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI|EOSQ"))
+						filter(str_detect(name, "\\.\\w{1}\\.\\d{2}|GCI|EOS"))
 						)
 summary(model_lm)
 

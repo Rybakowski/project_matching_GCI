@@ -7,7 +7,7 @@ library(writexl)
 library(tidyverse)
 library(naniar)
 library(neverhpfilter)
-
+?yth_filter
 
 ### Przetwarzanie danych WEF - GCI ### ------------------------------------------------------------
 
@@ -33,6 +33,7 @@ my_hamilton <- function(dates, column){
 	output <- zoo::coredata(temp)[,2]
 	return(output)
 }
+
 
 # Freedom & Polity 2 --------------------------------------------------------------------------
 

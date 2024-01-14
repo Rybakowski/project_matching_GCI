@@ -4,11 +4,75 @@
 ## Function input is vector.
 ## Function output is vector.
 ## Some parameters which can determine jump definition.
+detect_jump_v2 <- function(
+		vector,
+		jump_years = 3,
+		check_years = 3,
+		min_jump = 0.5){
+	len_vector = length(vector)
+	vector_output <- rep(0,len_vector)
+	for (ii in 1:len_vector){
+		success <- FALSE
+		# Count years which are necessary for letter actions
+		if(len_vector -(ii+jump_years-1) - check_years < 0 ){
+			# print(ii)
+			break
+		}
+		# Jump period detecting:
+		# Remember, for example for
+		#jump period equal 2, we take vector with length 3!
+		jump_period <- vector[ii:(ii+jump_years)]
+		
+		last_check_year <- len_vector
+		#If jump_period is larger than one year, check narrower definition.
+		#If they are satisfied, go next. (maybe it would better to make recursive call here?)
+		earlier <- 0
+		# print(c("before loop", ii))
+		for(jj in (length(jump_period)-2):0){
+			# print(c(ii,jj))
+			jump <- jump_period[jump_years -jj + 1] - jump_period[1]
+			# print(c("jj", jj, jump))
+			# Check minimum jump
+			if(jump < min_jump){
+				next
+			}
+			# print(c("jj", jj))
+			# Check if length of vector to check is sufficient
+			if((ii+jump_years-jj+check_years) <= len_vector){
+				last_check_year <- (ii+jump_years-jj+check_years)
+			} else{
+				# print(jj)
+				next
+			}
+			# print(c("jj", jj))
+			# Check next years in case if variable drop below minimal level
+			# print(list((ii+jump_years-jj):last_check_year, jump_period))
+			if(any(vector[(ii+jump_years-jj):last_check_year] - jump_period[1+jump_years-jj] < 0)){
+				next
+			}
+			earlier <- jj
+			success <- TRUE
+			# print(c("jj", jj))
+			break
+		}
+		# Indicate values of binary vector
+		if(success){
+			# print(ii)
+			vector_output[(ii+jump_years - earlier):len_vector] <- 1
+			break
+		}
+	}
+	# print(c(ii))
+	return(vector_output)
+}
+
+
 detect_jump <- function(
 		vector,
 		jump_years = 3,
 		check_years = 3,
 		min_jump = 0.5){
+	#version with results 2024-01-13
 	len_vector = length(vector)
 	vector_output <- rep(0,len_vector)
 	for (ii in 1:len_vector){
