@@ -113,15 +113,15 @@ detect_jump <- function(
 df <- tibble(
 	v1 =  c(1,1,2,1,0,0,0,1,2,2),
 	v2 =  c(1,1,2,2,1,0,0,1,2,2),
-	v3 =  c(1,1,1,2,1,0,0,0,2,2)
+	v3 =  c(1,1.03,1.04,1.05,1.06,1.04,1.03,1.02,0,0)
 )
 
 df %>% 
 	mutate(across(
 		.cols = everything(),
 		.fns = detect_jump, 
-		jump_years  = 2,
-		min_jump = 1,
+		jump_years  = 3,
+		min_jump = 0.05,
 		check_years = 3
 	))
 
@@ -739,20 +739,29 @@ table_results <- final_est_by_year %>%
 				 by = c("name" = "variables")) %>% 
 	select(name, series, everything()) %>%
 	left_join(dict_hier %>% 
-				 	select(matches("name_[234]")),
+				 	select(matches("name_[234]|trans_[34]")),
 				 by = c("series_unindented" = "name_4")) %>% 
 	unite(c(name_2, name_3,series_unindented), 
 			col = "series_unindented", 
 			sep = ", ",
 			na.rm = TRUE) %>% 
+	unite(c(trans_3, trans_4), 
+			col = "trans", 
+			sep = ", ",
+			na.rm = TRUE) %>% 
 	left_join(dict_hier %>%
-				 	select(matches("name_[23]"))%>% 
+				 	select(matches("name_[23]|trans_[3]"))%>% 
 				 	distinct(),
 				 by = c("series_unindented" = "name_3")) %>% 
+	unite(c(trans_3, trans), 
+			col = "trans", 
+			sep = "",
+			na.rm = TRUE) %>% 
 	unite(c(name_2, series_unindented), 
 			col = "series_unindented", 
 			sep = ", ",
-			na.rm = TRUE)
+			na.rm = TRUE) 
+	
 
 table_results_2 <- table_results %>% 
 	mutate(b = ifelse(is.na(b), 0, b)) %>% 
@@ -764,7 +773,7 @@ table_results_2 <- table_results %>%
 	mutate(series_unindented = ifelse(series_unindented %in% pilar_1_to_rem,
 												 series_unindented,
 												 str_remove(series_unindented, "^\\d{1,2}.+?,\\s"))) %>% 
-	select(a,pilar, series_unindented, count_defs, matches("estimate"), matches("^sig_pos"))
+	select(a,pilar,trans, series_unindented, count_defs, matches("estimate"), matches("^sig_pos"))
 # exp(0.0098)
 
 table_results_3 <- table_results %>%
@@ -798,7 +807,7 @@ table_results_3 <- table_results %>%
 # 									 , paste0(series.y, " ", series.x))) %>% 
 # 	select(series.x, count_defs, matches("estimate"), matches("^sig_pos")) 
 		
-# write_xlsx(table_results, "table_results3.xlsx")
+# write_xlsx(table_results, "table_results2.xlsx")
 # write_xlsx(table_results_3, "table_results_full_2024_01_11_head.xlsx")
 ```
 ### Plots:
@@ -912,7 +921,7 @@ df_errorbars2 <- final_est %>%
 	filter(is.na(c)&!is.na(b)) %>% 
 	rename(lower = `5%`, 
 			 upper = `95%`) %>% 
-	mutate(year = as.factor(paste0("t+",year -1))) %>% 
+	mutate(year = as.factor(year -1)) %>% 
 	mutate(group = as.factor(trans_2)) %>% 
 	ungroup() %>% 
 	group_by(name) %>% 

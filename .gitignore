@@ -2,3 +2,13 @@
 .Rhistory
 .RData
 .Ruserdata
+4_Literatura
+5_inne
+6_teksty
+backup
+old
+3_Modelowanie/backup
+3_Modelowanie/old
+3_Modelowanie/results*
+3_Modelowanie/*.xlsx
+3_Modelowanie/**/*.xlsx
